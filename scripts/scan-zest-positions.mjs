@@ -17,16 +17,24 @@
  *   mask, ...} for id = 0..get-nr()-1. mask's low 64 bits are collateral
  *   (bit = asset-id), high 64 bits are debt (bit = asset-id + 64).
  *
- *   Pricing: only 3 real Pyth Lazer feeds exist in the whole protocol --
- *   u1 (sBTC), u7 (USDC), u45 (STX) -- confirmed by reading
- *   resolve-pyth's hardcoded ident->feed-id table directly. USDH prices
- *   via a separate DIA oracle call (its "ident" is a Clarity-serialized
- *   string, "USDh/USD", not a Pyth hash -- confirmed by decoding the
- *   0x0d... consensus-buff prefix). Every other asset (the 7 v0-vault-*
+ *   Pricing: Zest's on-chain liquidate() itself only recognizes 3 real
+ *   Pyth Lazer feeds -- u1 (sBTC), u7 (USDC), u45 (STX) -- confirmed by
+ *   reading resolve-pyth's hardcoded ident->feed-id table directly, plus
+ *   USDH via a separate DIA oracle call ("USDh/USD", confirmed by
+ *   decoding the 0x0d... consensus-buff prefix). That's what the real
+ *   on-chain execution needs -- this SCANNER, which only estimates risk
+ *   off-chain and submits nothing, does NOT need Lazer's STX feed at
+ *   all. It uses DIA's own independent STX/USD feed instead (same oracle
+ *   contract as USDH, confirmed live), since this account's Lazer plan
+ *   (Demo) doesn't grant feed 45 -- and checked directly, there's no
+ *   cheaper Lazer tier to fall back to either: Pyth Core (their free
+ *   pull-oracle) dropped Stacks support entirely on 2026-08-26, so Lazer
+ *   is now the only Pyth product on Stacks, full stop. See fetchDiaStx's
+ *   own comment for the detail. Every other asset (the 7 v0-vault-*
  *   zToken/share tokens, stSTX, stBTC) derives its price from one of
- *   these via a callcode multiplier (ztoken index, ststx ratio, stbtc
- *   ratio) rather than an independent feed -- confirmed by reading
- *   resolve-callcode's full dispatch table.
+ *   these base prices via a callcode multiplier (ztoken index, ststx
+ *   ratio, stbtc ratio) rather than an independent feed -- confirmed by
+ *   reading resolve-callcode's full dispatch table.
  *
  *   normalize-pyth(price, exponent) rescales any Pyth price to a fixed
  *   "USD x 1e8" representation regardless of the feed's native exponent.
@@ -54,8 +62,7 @@
  * receiver built this session.
  *
  * Usage:
- *   node scripts/scan-zest-positions.mjs
- *   LAZER_TOKEN="..." node scripts/scan-zest-positions.mjs   -- live Lazer prices (else cached/stale fallback refused)
+ *   LAZER_TOKEN="..." node scripts/scan-zest-positions.mjs   -- required, for live sBTC/USDC prices (STX comes from DIA, no token needed)
  *   NOVA_CROSSCHECK=3 node scripts/scan-zest-positions.mjs   -- cross-check the top N candidates against Nova
  */
 
@@ -170,16 +177,13 @@ function uw(v) {
 }
 
 // ── Fetch a set of Lazer feeds in one isolated client, with a timeout ──────
-// Isolated per call (not all three feeds in one client) because a single
-// feed lacking entitlement throws inside the WebSocket pool's own
+// Isolated per call (not all feeds in one client) because a single feed
+// lacking entitlement throws inside the WebSocket pool's own
 // dedupeHandler, not as a rejection on subscribe() -- it would otherwise
 // take the whole price fetch down even for feeds that DO work. Confirmed
 // live on this account: feed 1 (sBTC) and feed 7 (USDC) are both
-// entitled; feed 45 (STX) is not ("Not entitled: feed 45 (no grant
-// accepts this feed)") -- a real gap in the Lazer plan's grant, not a
-// code bug. STX is the base price for several derived assets (wSTX debt,
-// stSTX, and every zstx/zststx/zststxbtc vault share), so this blocks a
-// fully live scan until the plan grants it.
+// entitled. STX (feed 45) used to be fetched here too, but isn't anymore
+// -- see fetchDiaStx below for why.
 function fetchLazerFeeds(feedIds) {
   return new Promise((resolve, reject) => {
     const unhandled = (e) => { cleanup(); reject(e?.reason ?? e); };
@@ -242,26 +246,6 @@ async function fetchLazerPrices() {
     console.error(`ERROR: Lazer feeds 1/7 (sBTC/USDC) unavailable: ${e.message}`);
     process.exit(1);
   }
-  try {
-    Object.assign(got, await fetchLazerFeeds([45]));
-  } catch (e) {
-    // Fails closed by default -- a wrong/stale STX price would silently
-    // corrupt every valuation that derives from it. STX_PRICE_USD8_FALLBACK
-    // is an explicit, loudly-warned escape hatch for testing the REST of
-    // the pipeline (enumeration, egroup lookup, LTV math) while this
-    // entitlement gap exists -- never use its output for a real liquidation
-    // decision.
-    if (!process.env.STX_PRICE_USD8_FALLBACK) {
-      console.error(`ERROR: Lazer feed 45 (STX) unavailable: ${e.message}`);
-      console.error(`  This account's Lazer plan does not grant feed 45 -- check pythdata.app.`);
-      console.error(`  For testing ONLY (not a real price): STX_PRICE_USD8_FALLBACK=39000000 (= $0.39) node scripts/scan-zest-positions.mjs`);
-      process.exit(1);
-    }
-    const fallback = BigInt(process.env.STX_PRICE_USD8_FALLBACK);
-    console.error(`\n  *** WARNING: using STX_PRICE_USD8_FALLBACK=${fallback} instead of a live feed 45 price. ***`);
-    console.error(`  *** This is a hardcoded stand-in for testing only -- do NOT trust any output from this run for a real liquidation decision. ***\n`);
-    got[45] = { price: fallback, exponent: -8 };
-  }
   return got;
 }
 
@@ -278,11 +262,32 @@ async function fetchDiaUsdh() {
   return BigInt(v.value.value.value); // already USD x 1e8, confirmed live (100000000 = $1.00)
 }
 
+// STX used to come from Lazer feed 45, but that account's Lazer plan
+// (Demo) doesn't grant it -- confirmed live ("Not entitled: feed 45").
+// Checked whether a cheaper Lazer tier exists instead: it doesn't --
+// Pyth Core (their free pull-oracle, Hermes) dropped Stacks support
+// entirely on 2026-08-26, so Lazer is now the ONLY Pyth product live on
+// Stacks at all, and its Free tier has no API access, period -- Starter
+// ($500/mo) is the only paid-API floor. For the real on-chain liquidate()
+// submission this is unavoidable (Zest's own v0-8-market hardcodes
+// verification against a genuine signed Lazer buffer -- not FlashStack's
+// choice of oracle to swap). But THIS function only estimates who's at
+// risk off-chain, never submits anything on-chain, so it doesn't need
+// Lazer's entitlement at all -- DIA (the same oracle Zest itself already
+// uses for USDH, see fetchDiaUsdh) has its own independent STX/USD feed,
+// confirmed live (STX/USD -> $0.3947 at the time of checking, same USD x
+// 1e8 scale as USDh/USD). Free, no entitlement, plain contract-call.
+// Replaces the old STX_PRICE_USD8_FALLBACK manual escape hatch entirely.
+async function fetchDiaStx() {
+  const v = await readOnly(DIA, "get-value", [cvToHex(Cl.stringAscii("STX/USD"))]);
+  return BigInt(v.value.value.value);
+}
+
 // ── Resolve every asset's price (USD x 1e8), applying callcodes ────────────
 async function resolveAllPrices() {
   const lazer = await fetchLazerPrices();
   const basePrices = {
-    stx:  normalizePyth(lazer[45].price, lazer[45].exponent),
+    stx:  await fetchDiaStx(),
     sbtc: normalizePyth(lazer[1].price, lazer[1].exponent),
     usdc: normalizePyth(lazer[7].price, lazer[7].exponent),
     usdh: await fetchDiaUsdh(),
