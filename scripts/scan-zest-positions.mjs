@@ -136,13 +136,26 @@ export async function readOnly(contract, fn, args, attempt = 0) {
   // bare ETIMEDOUT partway through (a transient network read timeout, not
   // a rate limit), which threw directly out of fetch() and was never
   // caught by the parse-step try/catch below, killing the whole scan.
+  //
+  // fetch() itself has no default timeout -- confirmed live, the hard way:
+  // a long-running watch loop hung completely (0% CPU, no open socket,
+  // zero log output) for 37+ minutes on a single stuck call, silently
+  // stuck on an `await` that was never going to resolve or reject on its
+  // own. AbortController forces it to actually fail after a bounded time
+  // so the existing retry logic below can do its job.
   let raw, text;
   try {
-    raw = await fetch(`${API}/v2/contracts/call-read/${addr}/${name}/${fn}`, {
-      method: "POST", headers,
-      body: JSON.stringify({ sender: addr, arguments: args }),
-    });
-    text = await raw.text();
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 20000);
+    try {
+      raw = await fetch(`${API}/v2/contracts/call-read/${addr}/${name}/${fn}`, {
+        method: "POST", headers, signal: controller.signal,
+        body: JSON.stringify({ sender: addr, arguments: args }),
+      });
+      text = await raw.text();
+    } finally {
+      clearTimeout(abortTimer);
+    }
   } catch (e) {
     if (attempt < 8) { await sleep(2000 * (attempt + 1)); return readOnly(contract, fn, args, attempt + 1); }
     throw new Error(`${contract}.${fn}: network error after retries: ${e.message}`);
