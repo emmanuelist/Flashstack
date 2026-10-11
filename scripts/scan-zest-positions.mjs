@@ -172,7 +172,7 @@ async function readOnly(contract, fn, args, attempt = 0) {
 // keeps one. This normalizes both to the same shape. Tuple FIELDS
 // (accessed as obj["field-name"]) are consistently enveloped either way
 // -- only the outermost level varies.
-function uw(v) {
+export function uw(v) {
   return v && typeof v === "object" && !Array.isArray(v) && "value" in v ? v.value : v;
 }
 
