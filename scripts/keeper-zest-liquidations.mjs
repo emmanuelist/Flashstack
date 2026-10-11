@@ -49,15 +49,17 @@
  *     accounts -- this keeper has nothing to act on today regardless.
  *
  * Usage:
- *   LAZER_TOKEN="..." node scripts/keeper-zest-liquidations.mjs
- *   EXECUTE=true LAZER_TOKEN="..." DEPLOYER_MNEMONIC="..." node scripts/keeper-zest-liquidations.mjs
+ *   LAZER_TOKEN="..." node scripts/keeper-zest-liquidations.mjs                  -- single scan
+ *   WATCH=true LAZER_TOKEN="..." node scripts/keeper-zest-liquidations.mjs       -- loop every INTERVAL_MS, same shape as monitor-alex-arb.mjs
+ *   EXECUTE=true WATCH=true LAZER_TOKEN="..." DEPLOYER_MNEMONIC="..." node scripts/keeper-zest-liquidations.mjs
  *
  * Environment variables:
- *   LAZER_TOKEN         — required (same account used by the scanner)
+ *   LAZER_TOKEN         — required (same account used by the scanner, for sBTC/USDC feeds)
+ *   WATCH               — "true" to loop forever instead of scanning once (default: single scan)
+ *   INTERVAL_MS         — loop interval in ms when WATCH=true (default: 300000 = 5 min)
  *   DEPLOYER_MNEMONIC   — 24-word mnemonic, must own the receiver contract (required for EXECUTE=true)
  *   EXECUTE             — "true" to broadcast real transactions (default: dry-run)
  *   MAX_ACCOUNTS        — cap accounts scanned, same as scan-zest-positions.mjs
- *   STX_PRICE_USD8_FALLBACK — testing-only escape hatch, same as the scanner (fails closed without it)
  *   HIRO_API_KEY        — optional, raises the Hiro rate limit
  */
 
@@ -87,6 +89,8 @@ const EXECUTE       = process.env.EXECUTE === "true";
 const LAZER_TOKEN   = process.env.LAZER_TOKEN;
 const MAX_ACCOUNTS  = process.env.MAX_ACCOUNTS;
 const HIRO_API_KEY  = process.env.HIRO_API_KEY;
+const WATCH         = process.env.WATCH === "true";
+const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS ?? "300000"); // 5 min default -- a full scan is 1,334 accounts, no reason to hammer Hiro faster
 
 if (EXECUTE && !MNEMONIC) {
   console.error("ERROR: EXECUTE=true requires DEPLOYER_MNEMONIC (must own the receiver contract)");
@@ -272,14 +276,9 @@ function sizeLoan(decision) {
   return decision.topDebt.actual;
 }
 
-async function main() {
-  console.log("==========================================================");
-  console.log("  FlashStack — Zest Liquidation Keeper");
-  console.log("==========================================================");
-  console.log(`  Mode:     ${EXECUTE ? "LIVE EXECUTION" : "dry-run (mapping only)"}`);
-  console.log(`  Receiver: ${RECEIVER}  (NOT YET DEPLOYED as of this writing -- see PR #98)`);
-  console.log();
-
+// ── One scan pass: look for candidates, act on them if EXECUTE, return whether any were found ──
+async function scan() {
+  console.log(`\n[${new Date().toISOString()}] Scanning...`);
   console.log("Fetching live prices (Lazer + DIA)...");
   const prices = await resolveAllPrices();
 
@@ -305,10 +304,11 @@ async function main() {
   console.log(`\r  done: ${candidates.length} liquidatable candidate(s) found`);
 
   if (candidates.length === 0) {
-    console.log("\nNothing to do -- no liquidatable accounts right now.");
-    return;
+    console.log("No liquidatable accounts right now.");
+    return 0;
   }
 
+  let actionable = 0;
   for (const candidate of candidates) {
     console.log(`\n--- ${candidate.account} ---`);
     console.log(`  collateral-usd: $${(Number(candidate.collateralUsd) / 1e8).toFixed(2)}  debt-usd: $${(Number(candidate.debtUsd) / 1e8).toFixed(2)}`);
@@ -319,7 +319,11 @@ async function main() {
       continue;
     }
     decision.loanAmount = sizeLoan(decision);
-    console.log(`  Mode ${decision.mode}: ${decision.label}`);
+    actionable++;
+    // Grep-able marker, same convention as monitor-alex-arb.mjs /
+    // monitor-bitflow-arb.mjs's "*** ARB OPPORTUNITY ***" -- a Monitor
+    // watch on this script's output greps for this exact string.
+    console.log(`  *** LIQUIDATION OPPORTUNITY *** ${candidate.account} -- mode ${decision.mode} (${decision.label})`);
     console.log(`  Target debt: ${decision.topDebt.actual} raw units of ${decision.topDebt.asset}`);
     console.log(`  Loan size:   ${decision.loanAmount} ${decision.core === "sbtc" ? "sat sBTC" : "microSTX"} (exact -- no-swap mode)`);
     if (NEEDS_STX_FEED_MODES.has(decision.mode)) {
@@ -332,6 +336,35 @@ async function main() {
     } else {
       console.log(`  (dry-run -- set EXECUTE=true DEPLOYER_MNEMONIC="..." to trigger)`);
     }
+  }
+  return actionable;
+}
+
+async function main() {
+  console.log("==========================================================");
+  console.log("  FlashStack — Zest Liquidation Keeper");
+  console.log("==========================================================");
+  console.log(`  Mode:     ${EXECUTE ? "LIVE EXECUTION" : "dry-run (mapping only)"}`);
+  console.log(`  Watch:    ${WATCH ? `looping every ${INTERVAL_MS / 1000}s` : "single scan"}`);
+  console.log(`  Receiver: ${RECEIVER}  (NOT YET DEPLOYED as of this writing -- see PR #98)`);
+
+  if (!WATCH) {
+    await scan();
+    return;
+  }
+
+  // Loop mode -- same shape as monitor-alex-arb.mjs / monitor-bitflow-arb.mjs,
+  // so a Monitor watch can grep this script's stdout the same way. A
+  // single account's evaluation failure (handled inside scan() already)
+  // doesn't stop the loop; an unexpected error from scan() itself is
+  // logged and the loop continues rather than crashing the whole watch.
+  for (;;) {
+    try {
+      await scan();
+    } catch (e) {
+      console.error(`  SCAN FAILED: ${e.message}`);
+    }
+    await new Promise((r) => setTimeout(r, INTERVAL_MS));
   }
 }
 
