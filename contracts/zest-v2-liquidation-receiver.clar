@@ -31,17 +31,38 @@
 ;; reuse of a stale (and by then probably-expired) signed update.
 ;;
 ;; Supported modes (set-target before calling flash-loan):
-;;   1 - STX flash  -> pay USDCx debt -> receive sBTC collateral -> swap sBTC->STX -> repay
-;;   2 - STX flash  -> pay USDH debt  -> receive sBTC collateral -> swap sBTC->STX -> repay
-;;   3 - STX flash  -> pay wSTX debt  -> receive sBTC collateral -> swap sBTC->STX -> repay
-;;      (mode 3 requires wSTX on a DEX -- see note in execute-stx-flash)
+;;   1 - DISABLED. STX flash -> pay USDCx debt -> receive sBTC collateral
+;;      -> swap sBTC->STX -> repay. See SWAP ROUTE note below -- there is
+;;      currently no valid Velar pool for this leg. set-target rejects
+;;      mode 1 with ERR-NO-SWAP-ROUTE.
+;;   2 - DISABLED, same reason as mode 1 (USDH debt instead of USDCx).
+;;   3 - DISABLED, same reason as mode 1 (wSTX debt instead of USDCx).
 ;;   4 - STX flash  -> pay wSTX debt  -> receive wSTX collateral -> repay (no swap --
 ;;      same asset both sides, the flash-borrowed STX itself is the payment,
-;;      since Zest's wSTX is a thin passthrough to native STX)
+;;      since Zest's wSTX is a thin passthrough to native STX). The only
+;;      mode execute-stx-flash actually runs right now.
 ;;   5 - sBTC flash -> pay sBTC debt  -> receive sBTC collateral -> repay (no swap,
 ;;      same reasoning as mode 4 -- goes through execute-sbtc-flash, a
 ;;      separate entry point, since it needs flashstack-sbtc-core not
 ;;      flashstack-stx-core)
+;;
+;; SWAP ROUTE (modes 1-3, disabled -- found while wiring up the keeper
+;; bot's live Velar quote, verified directly against chain state, not
+;; assumed): VELAR-POOL-SBTC-STX (u70) is NOT the sBTC/STX pool -- it's
+;; an unrelated wstx/meme-coin pool (confirmed: token0=wstx, token1 is a
+;; meme token). Scanned all 87 Velar pools directly: the only wstx-paired
+;; pool with "sbtc" in its token name is id 60, but it trades
+;; SP3R4MHK99JAAM0N3T0CBZRZVSVQFG1N75DQ08JSD.sbtc -- a DIFFERENT contract
+;; from the canonical sBTC (SM3VDXK3...sbtc-token) this receiver actually
+;; redeems from Zest's vault. Fixing the pool id alone wouldn't work --
+;; there is no known Velar route for the REAL sBTC this receiver holds.
+;; The same wrong u70 assumption is also hardcoded in
+;; contracts/velar-sbtc-arb-receiver.clar and contracts/hk-sbtc-real-receiver-v1.clar
+;; -- worth flagging separately, not fixed here. Modes 1-3's swap-leg code
+;; is left in place below (now with the min-stx-out/profit fixes applied)
+;; for whenever a real route is found, but is unreachable: set-target
+;; rejects arming them, and execute-stx-flash asserts mode == u4 as
+;; defense in depth on top of that.
 ;;
 ;; Modes 4-5 replace what zest-liquidation-receiver.clar (retired -- it
 ;; targeted a long-dead contract, SP2VCQJGH...pool-borrow-v2-3, and had none
@@ -64,16 +85,58 @@
 ;; convert the shares into real spendable underlying before swapping or
 ;; repaying.
 ;;
+;; SECURITY (found in external review, verified independently before
+;; fixing -- same discipline as the F-10 remediation earlier this session):
+;;
+;;   flashstack-stx-core.flash-loan has NO caller restriction at all --
+;;   confirmed directly against its deployed source. Anyone can call it
+;;   for any approved receiver, with any amount, as long as the receiver
+;;   is approved. Combined with a keeper that sends set-target,
+;;   set-price-feed, and flash-loan as three SEPARATE transactions, a
+;;   third party could watch the first two land on-chain and then fire the
+;;   flash-loan themselves, at a moment and with an amount of their own
+;;   choosing. armed-amount below closes the "amount of their own
+;;   choosing" half of that: execute-stx-flash/execute-sbtc-flash now
+;;   assert the real flash-loan amount matches exactly what was armed via
+;;   set-target, or revert.
+;;
+;;   The sBTC->STX swap's old minimum-output floor (modes 1-3) was
+;;   computed as `sbtc-bal * slippage-bp / 10000` -- a number scaled to
+;;   SATS, the INPUT token's units. Confirmed directly against Velar's
+;;   deployed univ2-router that amt-out-min is checked against the
+;;   OUTPUT token's units (microSTX here). 1 sat of sBTC is worth on the
+;;   order of 2,000+ microSTX at typical BTC/STX prices, so that computation
+;;   was never a real slippage floor -- effectively zero protection.
+;;   min-stx-out below replaces it with an owner-set, correctly-united
+;;   floor, required nonzero before any swap-mode execution.
+;;
+;;   The old final check (`stx-bal >= owed`) only verified the flash loan
+;;   gets repaid -- it said nothing about whether THIS liquidation was
+;;   itself profitable. Combined with the two gaps above, a third party
+;;   could trigger the loan, move the Velar price around their own
+;;   trigger, and walk away with the liquidation bonus (and any unswept
+;;   profit already sitting in the contract) while the core still got
+;;   repaid cleanly -- same outcome as F-10, a different route. The new
+;;   final check captures this transaction's OWN starting balance first,
+;;   then requires the ending balance to exceed it by at least fee +
+;;   min-profit, independent of any stale leftover balance. Modes 4-5
+;;   don't swap, so the price-manipulation angle doesn't apply to them,
+;;   but the same profit check still does -- there's just much less to
+;;   take there.
+;;
 ;; Liquidation profit = Zest bonus (5-10%) - FlashStack fee (0.05%) - swap slippage (~0.3%, modes 1-3 only)
 ;; Net expected: 4-9% per liquidated position (modes 1-3); 5-10% minus the 0.05% flash fee for 4-5.
 ;;
 ;; Flow:
-;;   1. Call set-target(borrower, debt-amount, mode)
+;;   1. Call set-target(borrower, debt-amount, mode, amount) -- amount is
+;;      the EXACT flash-loan size this liquidation is sized for.
 ;;   2. Call set-price-feed(feed) with a freshly-fetched signed Pyth Lazer update
-;;   3. Call flashstack-stx-core.flash-loan (modes 1-4) or
-;;      flashstack-sbtc-core.flash-loan (mode 5) with this contract as receiver
-;;   4. FlashStack calls back execute-stx-flash / execute-sbtc-flash
-;;   5. Receiver liquidates Zest (swapping first/after where the mode needs it), repays
+;;   3. Modes 1-3 only: call set-min-stx-out(min-out) with a fresh Velar quote
+;;   4. Call flashstack-stx-core.flash-loan (modes 1-4) or
+;;      flashstack-sbtc-core.flash-loan (mode 5) with this contract as receiver,
+;;      using the EXACT amount armed in step 1
+;;   5. FlashStack calls back execute-stx-flash / execute-sbtc-flash
+;;   6. Receiver liquidates Zest (swapping first/after where the mode needs it), repays
 
 (impl-trait 'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 (impl-trait 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait.sbtc-flash-receiver-trait)
@@ -96,6 +159,10 @@
 (define-constant ERR-NOT-PENDING  (err u909))
 (define-constant ERR-NO-PRICE-FEED (err u910))
 (define-constant ERR-REDEEM-FAILED (err u911))
+(define-constant ERR-NO-PROFIT     (err u912))
+(define-constant ERR-AMOUNT-MISMATCH (err u913))
+(define-constant ERR-MIN-STX-OUT-UNSET (err u914))
+(define-constant ERR-NO-SWAP-ROUTE (err u915))
 
 ;; FlashStack cores (hardcoded -- repayment never goes elsewhere)
 (define-constant FLASH-CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
@@ -159,6 +226,32 @@
 ;; flash-loan call (see header). Auto-reset to none after each use.
 (define-data-var price-feed-buffer (optional (buff 8192)) none)
 
+;; Exact flash-loan amount expected for the currently-armed target, set
+;; alongside it via set-target. execute-stx-flash/execute-sbtc-flash
+;; assert the REAL amount matches this exactly -- closes the gap where
+;; flashstack-stx-core.flash-loan has no caller restriction at all (any
+;; account can trigger it for any approved receiver, with any amount, the
+;; moment set-target/set-price-feed are both visible on-chain) by making
+;; an amount that doesn't match this specific liquidation simply revert.
+;; Reset to u0 (along with target-mode) after use -- u0 can never match a
+;; real flash-loan amount (flashstack-stx-core itself rejects amount u0),
+;; so this also fails closed before set-target is ever called.
+(define-data-var armed-amount uint u0)
+
+;; Minimum sBTC->STX swap output, in microSTX (modes 1-3 only -- the ones that
+;; swap). Owner-set fresh before each use, same pattern as price-feed-buffer.
+;; Required nonzero for modes 1-3 (ERR-MIN-STX-OUT-UNSET otherwise).
+;; Auto-reset to u0 after each use.
+(define-data-var min-stx-out uint u0)
+
+;; Minimum STX profit required above repayment (modes 1-4) / minimum sBTC
+;; profit required above repayment (mode 5), measured against THIS
+;; transaction's own starting balance (captured fresh at the top of each
+;; callback) -- see header's SECURITY note. Standing policy floors, not
+;; reset after use, same as bitflow-arb-receiver-v5's min-profit.
+(define-data-var min-profit-stx uint u1)
+(define-data-var min-profit-sbtc uint u1)
+
 ;; =============================================
 ;; STX Flash Loan Callback
 ;; =============================================
@@ -166,12 +259,20 @@
 ;; Called by flashstack-stx-core after sending 'amount' STX to this contract.
 ;; Pre-conditions: set-target AND set-price-feed must both have been called
 ;; (in that order doesn't matter, but both are required -- see headers).
+;; Modes 1-3 also require set-min-stx-out.
 (define-public (execute-stx-flash (amount uint) (core principal))
   (let (
+    ;; Captured BEFORE anything else runs -- by the time this callback
+    ;; fires, flashstack-stx-core has already sent `amount` to this
+    ;; contract, so this already includes it (plus any stale unswept
+    ;; leftover from an earlier liquidation). The final profit check
+    ;; measures growth from this exact snapshot, not from zero.
+    (balance-before (stx-get-balance (as-contract tx-sender)))
     (fee-bp  (unwrap! (contract-call? FLASH-CORE get-fee-basis-points) ERR-REPAY-FAILED))
     (raw-fee (/ (* amount fee-bp) BASIS-POINTS))
     (fee     (if (> raw-fee u0) raw-fee u1))
     (owed    (+ amount fee))
+    (min-profit (var-get min-profit-stx))
     (borrower (var-get target-borrower))
     (debt-amt (var-get target-debt))
     (mode    (var-get target-mode))
@@ -188,14 +289,27 @@
     (asserts! (is-eq core FLASH-CORE) ERR-NOT-CORE)
     ;; mode 5 goes through execute-sbtc-flash, not here
     (asserts! (and (>= mode u1) (<= mode u4)) ERR-BAD-MODE)
+    ;; Modes 1-3 are blocked at set-target already (see its own note) --
+    ;; this is defense in depth only, since target-mode should never
+    ;; actually be 1/2/3 by the time this runs. Not swap-route-dependent:
+    ;; mode 4 is the only mode this callback ever actually executes.
+    (asserts! (is-eq mode u4) ERR-NO-SWAP-ROUTE)
+    ;; flashstack-stx-core.flash-loan itself has no caller restriction --
+    ;; confirmed directly against its deployed source, anyone can trigger
+    ;; it for any approved receiver with any amount. This is the real
+    ;; gate: the amount must match exactly what this liquidation was armed
+    ;; for, or revert -- see header's SECURITY note.
+    (asserts! (is-eq amount (var-get armed-amount)) ERR-AMOUNT-MISMATCH)
 
   (let ((feeds (some (list (unwrap! (var-get price-feed-buffer) ERR-NO-PRICE-FEED)))))
 
-    ;; Auto-reset: forces explicit re-fetching before the next loan rather
-    ;; than silently reusing a stale (by then likely-expired) signed update.
-    ;; A later failure in this same tx reverts this too, atomically --
-    ;; correct, since only a successful execution should consume it.
+    ;; Auto-reset: forces explicit re-fetching/re-arming before the next
+    ;; loan rather than silently reusing stale state. A later failure in
+    ;; this same tx reverts these too, atomically -- correct, since only a
+    ;; successful execution should consume them.
     (var-set price-feed-buffer none)
+    (var-set armed-amount u0)
+    (var-set target-mode u0)
 
     (if (is-eq mode u1)
 
@@ -229,17 +343,25 @@
               (get collateral liq-result) u0 (as-contract tx-sender)))
               ERR-REDEEM-FAILED)
 
-            ;; Step 3: Swap all received sBTC -> STX on Velar
+            ;; Step 3: Swap all received sBTC -> STX on Velar. min-stx-out
+            ;; is owner-set in microSTX (the output token's real units) --
+            ;; required nonzero and reset after use, same reasoning as
+            ;; price-feed-buffer. See header's SECURITY note for why the
+            ;; old sbtc-bal-derived floor was never real protection.
             (let ((sbtc-bal (unwrap! (as-contract (contract-call? SBTC get-balance tx-sender)) ERR-SWAP-FAILED)))
               (asserts! (> sbtc-bal u0) ERR-SWAP-FAILED)
-              (let ((min-stx (/ (* sbtc-bal (- BASIS-POINTS slip)) BASIS-POINTS)))
+              (let ((min-stx (var-get min-stx-out)))
+                (asserts! (> min-stx u0) ERR-MIN-STX-OUT-UNSET)
+                (var-set min-stx-out u0)
                 (unwrap! (as-contract (contract-call? VELAR-ROUTER swap-exact-tokens-for-tokens
                   VELAR-POOL-SBTC-STX VELAR-WSTX SBTC SBTC VELAR-WSTX VELAR-FEE-TO sbtc-bal min-stx))
                   ERR-SWAP-FAILED)
 
-                ;; Step 4: Repay to hardcoded FLASH-CORE
+                ;; Step 4: Repay to hardcoded FLASH-CORE. Profit check
+                ;; measures growth from balance-before, not a bare
+                ;; >= owed -- see header's SECURITY note.
                 (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
-                  (asserts! (>= stx-bal owed) ERR-INSUFFICIENT)
+                  (asserts! (>= stx-bal (+ balance-before fee min-profit)) ERR-NO-PROFIT)
                   (unwrap! (as-contract (stx-transfer? owed tx-sender FLASH-CORE)) ERR-REPAY-FAILED)
                   (ok true)
                 )
@@ -282,16 +404,18 @@
                 (get collateral liq-result) u0 (as-contract tx-sender)))
                 ERR-REDEEM-FAILED)
 
-              ;; Swap sBTC -> STX
+              ;; Swap sBTC -> STX -- min-stx-out, see mode 1's note above
               (let ((sbtc-bal (unwrap! (as-contract (contract-call? SBTC get-balance tx-sender)) ERR-SWAP-FAILED)))
                 (asserts! (> sbtc-bal u0) ERR-SWAP-FAILED)
-                (let ((min-stx (/ (* sbtc-bal (- BASIS-POINTS slip)) BASIS-POINTS)))
+                (let ((min-stx (var-get min-stx-out)))
+                  (asserts! (> min-stx u0) ERR-MIN-STX-OUT-UNSET)
+                  (var-set min-stx-out u0)
                   (unwrap! (as-contract (contract-call? VELAR-ROUTER swap-exact-tokens-for-tokens
                     VELAR-POOL-SBTC-STX VELAR-WSTX SBTC SBTC VELAR-WSTX VELAR-FEE-TO sbtc-bal min-stx))
                     ERR-SWAP-FAILED)
 
                   (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
-                    (asserts! (>= stx-bal owed) ERR-INSUFFICIENT)
+                    (asserts! (>= stx-bal (+ balance-before fee min-profit)) ERR-NO-PROFIT)
                     (unwrap! (as-contract (stx-transfer? owed tx-sender FLASH-CORE)) ERR-REPAY-FAILED)
                     (ok true)
                   )
@@ -325,16 +449,18 @@
               (get collateral liq-result) u0 (as-contract tx-sender)))
               ERR-REDEEM-FAILED)
 
-            ;; Swap received sBTC -> STX
+            ;; Swap received sBTC -> STX -- min-stx-out, see mode 1's note above
             (let ((sbtc-bal (unwrap! (as-contract (contract-call? SBTC get-balance tx-sender)) ERR-SWAP-FAILED)))
               (asserts! (> sbtc-bal u0) ERR-SWAP-FAILED)
-              (let ((min-stx (/ (* sbtc-bal (- BASIS-POINTS slip)) BASIS-POINTS)))
+              (let ((min-stx (var-get min-stx-out)))
+                (asserts! (> min-stx u0) ERR-MIN-STX-OUT-UNSET)
+                (var-set min-stx-out u0)
                 (unwrap! (as-contract (contract-call? VELAR-ROUTER swap-exact-tokens-for-tokens
                   VELAR-POOL-SBTC-STX VELAR-WSTX SBTC SBTC VELAR-WSTX VELAR-FEE-TO sbtc-bal min-stx))
                   ERR-SWAP-FAILED)
 
                 (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
-                  (asserts! (>= stx-bal owed) ERR-INSUFFICIENT)
+                  (asserts! (>= stx-bal (+ balance-before fee min-profit)) ERR-NO-PROFIT)
                   (unwrap! (as-contract (stx-transfer? owed tx-sender FLASH-CORE)) ERR-REPAY-FAILED)
                   (ok true)
                 )
@@ -348,7 +474,9 @@
         ;; passthrough to native STX -- confirmed directly, its transfer()
         ;; just calls stx-transfer?). Collateral is seized as v0-vault-stx
         ;; SHARES (see vault-share constants note above), redeemed here for
-        ;; real native STX (= STX), so repayment needs nothing else.
+        ;; real native STX (= STX), so repayment needs nothing else. No
+        ;; swap means no price-manipulation surface, but the same profit
+        ;; check below still applies -- see header's SECURITY note.
         (begin
           (let ((liq-result (unwrap! (as-contract (contract-call? ZEST-MARKET liquidate
               borrower V0-VAULT-STX ZEST-WSTX debt-amt u0 (some (as-contract tx-sender)) feeds))
@@ -360,7 +488,7 @@
               ERR-REDEEM-FAILED)
 
             (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
-              (asserts! (>= stx-bal owed) ERR-INSUFFICIENT)
+              (asserts! (>= stx-bal (+ balance-before fee min-profit)) ERR-NO-PROFIT)
               (unwrap! (as-contract (stx-transfer? owed tx-sender FLASH-CORE)) ERR-REPAY-FAILED)
               (ok true)
             )
@@ -382,10 +510,14 @@
 ;; set-price-feed must both have been called first.
 (define-public (execute-sbtc-flash (amount uint) (core principal))
   (let (
+    ;; See execute-stx-flash's balance-before for why this is captured
+    ;; first, in sBTC's own units here.
+    (balance-before (unwrap! (as-contract (contract-call? SBTC get-balance tx-sender)) ERR-REPAY-FAILED))
     (fee-bp  (unwrap! (contract-call? FLASH-SBTC-CORE get-fee-basis-points) ERR-REPAY-FAILED))
     (raw-fee (/ (* amount fee-bp) BASIS-POINTS))
     (fee     (if (> raw-fee u0) raw-fee u1))
     (owed    (+ amount fee))
+    (min-profit (var-get min-profit-sbtc))
     (borrower (var-get target-borrower))
     (debt-amt (var-get target-debt))
     (mode    (var-get target-mode))
@@ -393,9 +525,14 @@
     (asserts! (is-eq contract-caller FLASH-SBTC-CORE) ERR-NOT-CORE)
     (asserts! (is-eq core FLASH-SBTC-CORE) ERR-NOT-CORE)
     (asserts! (is-eq mode u5) ERR-BAD-MODE)
+    ;; See execute-stx-flash's armed-amount note -- flashstack-sbtc-core.flash-loan
+    ;; has the same no-caller-restriction shape.
+    (asserts! (is-eq amount (var-get armed-amount)) ERR-AMOUNT-MISMATCH)
 
     (let ((feeds (some (list (unwrap! (var-get price-feed-buffer) ERR-NO-PRICE-FEED)))))
       (var-set price-feed-buffer none)
+      (var-set armed-amount u0)
+      (var-set target-mode u0)
 
       ;; Mode 5: sBTC debt + v0-vault-sbtc-share collateral -- no swap, same
       ;; reasoning as mode 4. Collateral is seized as SHARES (see
@@ -411,7 +548,7 @@
           ERR-REDEEM-FAILED)
 
         (let ((sbtc-bal (unwrap! (as-contract (contract-call? SBTC get-balance tx-sender)) ERR-REPAY-FAILED)))
-          (asserts! (>= sbtc-bal owed) ERR-INSUFFICIENT)
+          (asserts! (>= sbtc-bal (+ balance-before fee min-profit)) ERR-NO-PROFIT)
           (unwrap!
             (as-contract (contract-call? SBTC transfer owed tx-sender FLASH-SBTC-CORE none))
             ERR-REPAY-FAILED)
@@ -426,14 +563,28 @@
 ;; Owner Functions
 ;; =============================================
 
-(define-public (set-target (borrower principal) (debt uint) (mode uint))
+;; amount: the EXACT flash-loan size this liquidation is sized for.
+;; execute-stx-flash/execute-sbtc-flash revert with ERR-AMOUNT-MISMATCH if
+;; the real flash-loan amount doesn't match -- see header's SECURITY note.
+;;
+;; Modes 1-3 cannot be armed right now -- see header's SWAP ROUTE note.
+;; VELAR-POOL-SBTC-STX (u70) is NOT the sBTC/STX pool (confirmed live:
+;; it's an unrelated wstx/meme-coin pool), and the only wstx-paired pool
+;; that even has "sbtc" in its token name (id 60) trades a different sBTC
+;; contract than the one this receiver actually redeems from Zest's
+;; vault. Rejected here, at config time, rather than letting the owner
+;; arm a mode that execute-stx-flash would just revert on anyway.
+(define-public (set-target (borrower principal) (debt uint) (mode uint) (amount uint))
   (begin
     (asserts! (is-eq tx-sender (var-get owner)) ERR-NOT-OWNER)
     (asserts! (> debt u0) ERR-ZERO-AMOUNT)
+    (asserts! (> amount u0) ERR-ZERO-AMOUNT)
     (asserts! (and (>= mode u1) (<= mode u5)) ERR-BAD-MODE)
+    (asserts! (not (or (is-eq mode u1) (is-eq mode u2) (is-eq mode u3))) ERR-NO-SWAP-ROUTE)
     (var-set target-borrower borrower)
     (var-set target-debt debt)
     (var-set target-mode mode)
+    (var-set armed-amount amount)
     (ok true)
   )
 )
@@ -443,6 +594,38 @@
     (asserts! (is-eq tx-sender (var-get owner)) ERR-NOT-OWNER)
     (asserts! (and (>= bp u50) (<= bp u500)) ERR-BAD-MODE)
     (ok (var-set slippage-bp bp))
+  )
+)
+
+;; Set the minimum acceptable sBTC->STX swap output, in microSTX -- compute
+;; off-chain via a fresh Velar quote (VELAR-ROUTER / univ2-library.get-amount-out)
+;; immediately before calling flash-loan. Required for modes 1-3 only:
+;; execute-stx-flash reverts with ERR-MIN-STX-OUT-UNSET for those modes if
+;; this is still u0. Auto-reset to u0 after each successful use.
+(define-public (set-min-stx-out (min-out uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) ERR-NOT-OWNER)
+    (ok (var-set min-stx-out min-out))
+  )
+)
+
+;; Minimum STX profit required above repayment for modes 1-4, measured
+;; against this transaction's own starting balance (see header's SECURITY
+;; note). Standing floor, not reset after use -- raise it if the default
+;; (u1, i.e. "any nonzero profit") is too permissive for a given
+;; liquidation's size.
+(define-public (set-min-profit-stx (min-stx uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) ERR-NOT-OWNER)
+    (ok (var-set min-profit-stx min-stx))
+  )
+)
+
+;; Same as set-min-profit-stx, for mode 5's sBTC-denominated profit floor.
+(define-public (set-min-profit-sbtc (min-sats uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) ERR-NOT-OWNER)
+    (ok (var-set min-profit-sbtc min-sats))
   )
 )
 
@@ -519,7 +702,7 @@
 )
 
 (define-read-only (get-target)
-  (ok { borrower: (var-get target-borrower), debt: (var-get target-debt), mode: (var-get target-mode) })
+  (ok { borrower: (var-get target-borrower), debt: (var-get target-debt), mode: (var-get target-mode), amount: (var-get armed-amount) })
 )
 
 ;; Does NOT return the feed bytes themselves (no reason to -- it's public
@@ -531,4 +714,8 @@
 
 (define-read-only (get-owner)
   (ok { owner: (var-get owner), pending-owner: (var-get pending-owner) })
+)
+
+(define-read-only (get-swap-settings)
+  (ok { min-stx-out: (var-get min-stx-out), min-profit-stx: (var-get min-profit-stx), min-profit-sbtc: (var-get min-profit-sbtc) })
 )

@@ -8,18 +8,26 @@
  * eligibility functions directly (imported, not re-derived) so the two
  * scripts can never silently disagree about who's actually liquidatable.
  *
- * Mode mapping — matches zest-v2-liquidation-receiver.clar's 5 modes
- * exactly, keyed on "<collateral-asset-id>:<debt-asset-id>":
- *   3:6 -> mode 1  (v0-vault-sbtc collateral / USDCx debt,  STX flash)
- *   3:8 -> mode 2  (v0-vault-sbtc collateral / USDH debt,   STX flash)
- *   3:0 -> mode 3  (v0-vault-sbtc collateral / wSTX debt,   STX flash -- needs pre-held wSTX)
+ * Mode mapping — keyed on "<collateral-asset-id>:<debt-asset-id>":
  *   1:0 -> mode 4  (v0-vault-stx collateral  / wSTX debt,   STX flash, no swap)
  *   3:2 -> mode 5  (v0-vault-sbtc collateral / sBTC debt,   sBTC flash, no swap)
  * Collateral is always the VAULT-SHARE asset id (1 or 3), never the raw
  * underlying (0 or 2) -- confirmed empirically that's what real positions
  * actually hold (see the receiver's own header + PR #98's fix history).
  * Any other collateral/debt pair the scanner finds has no supported mode
- * yet and is skipped, logged, not guessed at.
+ * and is skipped, logged, not guessed at.
+ *
+ * Modes 1-3 (sBTC-collateral positions with USDCx/USDH/wSTX debt, needing
+ * a sBTC->STX swap) are NOT mapped here at all -- found independently
+ * while building this keeper, verified directly against live chain state:
+ * the receiver's VELAR-POOL-SBTC-STX constant was never the real sBTC/STX
+ * pool (it's an unrelated wstx/meme-coin pool), and the only wstx-paired
+ * pool with "sbtc" in its name trades a different sBTC contract than the
+ * one Zest's vault actually redeems. The receiver itself now rejects
+ * arming modes 1-3 (ERR-NO-SWAP-ROUTE). Until a real swap route is found
+ * and wired in on the receiver side, this keeper only ever proposes modes
+ * 4/5 -- a position whose largest asset pair needs a swap is reported as
+ * unsupported, not force-fit into a mode that would just revert.
  *
  * A position can hold several collateral and/or debt assets at once (the
  * bitmask model allows it); this keeper only targets the single
@@ -27,27 +35,16 @@
  * same conservative single-pair scope as every mode the receiver
  * implements. A multi-asset position is only ever partially covered.
  *
- * Loan sizing:
- *   - Modes 4/5 (no swap): exact -- the flash-borrowed asset IS the debt
- *     payment 1:1, so loan amount = debt amount, no estimation involved.
- *   - Modes 1-3 (swap-then-liquidate): the STX loan amount is a
- *     conservative USD-value estimate (debt-usd / stx-price, +buffer) --
- *     NOT a reverse swap-quote solve. This keeper does not implement
- *     iterative quote matching (the arb monitors' get-dy/get-dx pattern,
- *     adapted to solve backwards for loan size, is a separate build).
- *     Same philosophy already documented in scan-zest-positions.mjs's own
- *     header: the receiver's own balance/slippage checks are the real
- *     safety net for sizing precision, not this estimate. A wrong guess
- *     here fails the receiver's own asserts and reverts -- it does not
- *     risk a partial/unsafe execution.
+ * Loan sizing: exact for both supported modes -- the flash-borrowed asset
+ * IS the debt payment, 1:1, no estimation involved.
  *
  * Known blockers to live execution right now (flagged loudly, not
  * silently worked around):
  *   - zest-v2-liquidation-receiver is NOT YET DEPLOYED (PR #98, open).
- *   - Modes 3/4 price wSTX debt via Lazer feed 45 (STX); the active Lazer
+ *   - Mode 4 prices wSTX debt via Lazer feed 45 (STX); the active Lazer
  *     plan (Demo) does not grant that feed -- confirmed directly, see
- *     project memory. Modes 1/2/5 only need feeds 1 (sBTC) / 7 (USDC),
- *     which the Demo plan DOES grant, so they are not blocked by this.
+ *     project memory. Mode 5 only needs feed 1 (sBTC), which Demo grants,
+ *     so it's not blocked by this.
  *   - The current live scan (scan-zest-positions.mjs) finds 0 liquidatable
  *     accounts -- this keeper has nothing to act on today regardless.
  *
@@ -103,15 +100,14 @@ const RECEIVER       = `${DEPLOYER}.${RECEIVER_NAME}`;
 const STX_CORE_NAME  = "flashstack-stx-core";
 const SBTC_CORE_NAME = "flashstack-sbtc-core";
 
-// "<collateral-asset-id>:<debt-asset-id>" -> receiver mode. See header.
+// "<collateral-asset-id>:<debt-asset-id>" -> receiver mode. Only modes
+// 4/5 -- modes 1-3 need a sBTC->STX swap route that doesn't exist right
+// now (see header). The receiver itself rejects arming them.
 const MODE_MAP = {
-  "3:6": { mode: 1, core: "stx",  label: "sBTC-share collateral / USDCx debt" },
-  "3:8": { mode: 2, core: "stx",  label: "sBTC-share collateral / USDH debt" },
-  "3:0": { mode: 3, core: "stx",  label: "sBTC-share collateral / wSTX debt (needs pre-held wSTX)" },
   "1:0": { mode: 4, core: "stx",  label: "STX-share collateral / wSTX debt (no swap)" },
   "3:2": { mode: 5, core: "sbtc", label: "sBTC-share collateral / sBTC debt (no swap)" },
 };
-const NEEDS_STX_FEED_MODES = new Set([3, 4]);
+const NEEDS_STX_FEED_MODES = new Set([4]);
 
 // Lazer feed id per ASSET_TABLE priceSource. USDH has no Lazer feed (DIA
 // oracle, read internally by v0-8-market) so it's intentionally absent --
@@ -213,10 +209,17 @@ async function executeLiquidation(candidate, decision) {
 
   const debtAmount = decision.topDebt.actual;
 
-  console.log(`  1/3 set-target(${candidate.account}, ${debtAmount}, mode ${decision.mode})`);
+  // 4th arg (amount) is the exact flash-loan size this liquidation is
+  // armed for -- the receiver's own execute-stx-flash/execute-sbtc-flash
+  // now assert the real flash-loan amount matches this exactly
+  // (ERR-AMOUNT-MISMATCH otherwise), closing the gap where
+  // flashstack-stx-core.flash-loan has no caller restriction at all and
+  // anyone could otherwise fire an already-armed target with an amount
+  // of their own choosing (see the receiver's own header SECURITY note).
+  console.log(`  1/3 set-target(${candidate.account}, ${debtAmount}, mode ${decision.mode}, amount ${decision.loanAmount})`);
   const setTargetTx = await makeContractCall({
     contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-target",
-    functionArgs: [Cl.principal(candidate.account), Cl.uint(debtAmount), Cl.uint(decision.mode)],
+    functionArgs: [Cl.principal(candidate.account), Cl.uint(debtAmount), Cl.uint(decision.mode), Cl.uint(decision.loanAmount)],
     senderKey: pk, network, postConditionMode: PostConditionMode.Allow, anchorMode: 1, nonce, fee: 50_000,
   });
   console.log(`      ${EXPLORER}/0x${await broadcastOne(setTargetTx)}?chain=mainnet`);
@@ -263,18 +266,10 @@ async function executeLiquidation(candidate, decision) {
 }
 
 // ── Decide the loan amount for a mapped mode ───────────────────────────────
-function sizeLoan(decision, prices) {
-  if (decision.mode === 4 || decision.mode === 5) {
-    // No-swap modes: the flash-borrowed asset IS the debt payment, 1:1.
-    return decision.topDebt.actual;
-  }
-  // Swap modes (1-3): conservative STX-value estimate, +5% buffer for
-  // swap slippage/fees -- NOT a reverse quote solve. See header.
-  const stxPrice = prices[1]; // v0-vault-stx's priceSource is "stx"; id 1's base price == id 0's
-  const debtUsd  = Number(decision.topDebt.usd) / 1e8;
-  const stxUsd   = Number(stxPrice) / 1e8;
-  const estStx   = Math.ceil((debtUsd / stxUsd) * 1.05 * 1e6); // whole STX -> microSTX
-  return estStx;
+function sizeLoan(decision) {
+  // Only modes 4/5 are ever proposed (see MODE_MAP) -- both are no-swap,
+  // so the flash-borrowed asset IS the debt payment, 1:1, exactly.
+  return decision.topDebt.actual;
 }
 
 async function main() {
@@ -323,10 +318,10 @@ async function main() {
       console.log(`  SKIP -- ${decision.reason}`);
       continue;
     }
-    decision.loanAmount = sizeLoan(decision, prices);
+    decision.loanAmount = sizeLoan(decision);
     console.log(`  Mode ${decision.mode}: ${decision.label}`);
     console.log(`  Target debt: ${decision.topDebt.actual} raw units of ${decision.topDebt.asset}`);
-    console.log(`  Loan size:   ${decision.loanAmount} ${decision.core === "sbtc" ? "sat sBTC" : "microSTX"}${decision.mode <= 3 ? " (estimate, see header)" : " (exact)"}`);
+    console.log(`  Loan size:   ${decision.loanAmount} ${decision.core === "sbtc" ? "sat sBTC" : "microSTX"} (exact -- no-swap mode)`);
     if (NEEDS_STX_FEED_MODES.has(decision.mode)) {
       console.log(`  NOTE: mode ${decision.mode} prices wSTX debt via Lazer feed 45 (STX) -- blocked on`);
       console.log(`        the current Demo plan's entitlement gap (see project memory).`);
