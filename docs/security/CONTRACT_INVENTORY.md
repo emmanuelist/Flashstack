@@ -44,8 +44,10 @@ All confirmed live on Stacks mainnet 2026-09-15. Live state read on the same dat
 | `flashstack-yield-vault-v5` | `SP20XD46…` | Yes (vault) | not yet reviewed | not yet reviewed | Out of scope for this pass — filed for later review. |
 
 **Live receiver library** (`SP20XD46…`), all confirmed on chain, none hold protocol funds — they hold only transient loan proceeds inside a single transaction:
-`bitflow-arb-receiver-v4`, `velar-sbtc-arb-receiver`, `zest-liquidation-receiver`,
+`bitflow-arb-receiver-v4`, `velar-sbtc-arb-receiver`,
 `alex-arb-receiver-v2` / `-v3` / `-v4` / `-v5`, `stx-test-receiver`, `sbtc-test-receiver`.
+
+`zest-liquidation-receiver` is also deployed at this address, but is dead and should not be treated as part of the active system: it targets `SP2VCQJGH…pool-borrow-v2-3`, a Zest contract abandoned since block 1,931,700 (5 transactions ever, none successful recently), has none of the other receivers' F-10 hardening (no `contract-caller` check, repays to the caller-supplied `core` directly), and is confirmed `is-approved-receiver = false` on both cores with a 0 balance — not currently exploitable, but should never be re-approved. Its replacement, `zest-v2-liquidation-receiver` (targets the live `v0-8-market`, fully F-10-hardened, 5 modes), is not yet deployed.
 
 **Traits (immutable, load-bearing):**
 `SP3TGRVG….stx-flash-receiver-trait` (used by the live STX core and both STX pools) and

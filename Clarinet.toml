@@ -46,6 +46,9 @@ contract_id = "SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx"
 contract_id = "SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-4-market"
 
 [[project.requirements ]]
+contract_id = "SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-8-market"
+
+[[project.requirements ]]
 contract_id = "SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.wstx"
 
 [[project.requirements ]]
@@ -532,18 +535,14 @@ path = "contracts/velar-sbtc-arb-receiver.clar"
 clarity_version = 3
 epoch = "latest"
 
-[contracts.zest-liquidation-receiver]
-path = "contracts/zest-liquidation-receiver.clar"
+[contracts.zest-v2-liquidation-receiver]
+path = "contracts/zest-v2-liquidation-receiver.clar"
 clarity_version = 3
 epoch = "latest"
-
-# zest-v2-liquidation-receiver: NOT registered. clarinet check fails at line
-# 167 -- "expecting expression of type 'uint', found '(optional uint)'"
-# passing (some min-usdh) where a bare uint is expected. Unlike the two
-# read-only findings above, this looks like a straightforward type-mismatch
-# bug, not a static-analysis question -- but it's live on mainnet, so still
-# the Security Lead's call on whether it's a real bug in the deployed
-# contract or another source-drift case like F-7. Filed, not resolved.
+# The (some min-usdh) type-mismatch noted here previously is fixed -- see
+# the contract's own inline comment at that call site. Also migrated off
+# the now-dead v0-4-market onto v0-8-market, with a real Pyth Lazer
+# price-feed parameter threaded through (v0-8 requires one; v0-4 didn't).
 
 [contracts.flashstack-yield-vault]
 path = "contracts/flashstack-yield-vault.clar"
