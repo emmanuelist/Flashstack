@@ -465,6 +465,11 @@ path = "contracts/alex-arb-receiver-v5.clar"
 clarity_version = 3
 epoch = "latest"
 
+[contracts.bitflow-arb-receiver-v5]
+path = "contracts/bitflow-arb-receiver-v5.clar"
+clarity_version = 3
+epoch = "latest"
+
 # arkadiko-liquidation-receiver: NOT registered. clarinet check fails once its
 # real Arkadiko dependencies resolve: "expecting read-only statements, detected
 # a writing operation" in check-vault (line 249), which only calls
