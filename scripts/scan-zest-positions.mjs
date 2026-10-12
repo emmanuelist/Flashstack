@@ -209,13 +209,22 @@ function fetchLazerFeeds(feedIds) {
 
     const timer = setTimeout(() => { cleanup(); reject(new Error("timed out waiting for Lazer feeds " + feedIds)); }, 15000);
 
+    // error/warn were muted entirely before -- confirmed live this hides
+    // the REAL cause of a connection failure (auth rejection, DNS, TLS,
+    // protocol-level issue) behind a generic "timed out" message with
+    // nothing to tell the two apart. Left debug/info muted (too noisy),
+    // but error/warn and the pool's own onError now actually print.
     PythLazerClient.create({
       token: LAZER_TOKEN,
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      logger: {
+        debug: () => {}, info: () => {},
+        warn: (...a) => console.error("  [Lazer warn]", ...a),
+        error: (...a) => console.error("  [Lazer error]", ...a),
+      },
       webSocketPoolConfig: {
         urls: ["wss://pyth-lazer-0.dourolabs.app/v1/stream"],
         numConnections: 1,
-        onError: () => {},
+        onError: (e) => console.error("  [Lazer pool onError]", e?.message ?? e),
       },
     }).then((c) => {
       client = c;
@@ -243,6 +252,11 @@ function fetchLazerFeeds(feedIds) {
         channel: "fixed_rate@200ms",
         parsed: true,
       });
+    }).catch((e) => {
+      // Explicit catch on PythLazerClient.create() itself, not just the
+      // unhandledRejection safety net above -- more direct, same reject path.
+      cleanup();
+      reject(e);
     });
   });
 }
