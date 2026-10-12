@@ -6,16 +6,40 @@
 # running it now would attempt to republish already-existing contract names
 # (which the chain would reject).
 #
-# Moved here, out of deployments/, and renamed off "default.mainnet-plan.yaml"
-# specifically to break `clarinet deployments apply --mainnet`'s no-flags
-# auto-pickup convention. Until 2026-09-22 this file died early because two of
-# its 13 paths (contracts/snp-flashstack-receiver.clar and -v3.clar) did not
-# exist in the checkout — a missing-file error was accidentally doing safety
-# work nobody designed for it. PR #70 committed those two files verbatim
-# (closing D7), which made all 13 paths resolve and turned this into a
-# genuinely runnable plan for the first time. It still needed a real mainnet
-# deployer key and would still fail on-chain on duplicate names, but the
-# "dies on a missing file" backstop was gone. See CONTRACT_INVENTORY.md D5.
+# Moved here, out of deployments/, and renamed off "default.mainnet-plan.yaml".
+# CORRECTED 2026-09-26 -- twice. First a source-reading pass said this flag
+# "auto-selects" the file; a second source-reading pass said a clean checkout
+# was one Enter from broadcast. Both were wrong, found by actually RUNNING
+# clarinet 3.23.2 (the CI binary) in a network-isolated container, before and
+# after this archive, with a mock node recording every broadcast attempt:
+#
+#   - A clean checkout (no settings/Mainnet.toml) never broadcasts anything,
+#     before or after this archive. Recompute fails, falls back to this file,
+#     prompts Continue [Y/n]?, exits 0, ZERO requests sent -- before. Exits 1,
+#     still zero requests -- after. Neither path was ever a broadcast risk.
+#   - This plan could only ever be signed by SP3TGRVG... (any other key
+#     panics before signing), and all 13 of its names already exist there, so
+#     a real broadcast would have been refused as duplicates regardless.
+#
+# So archiving this file is hygiene -- it removed a route only the gen-1 key
+# could use, one the chain would have refused anyway -- not risk reduction.
+#
+# The actual, still-live exposure was never this file and this archive does
+# not touch it: on any machine with settings/Mainnet.toml, any key, the
+# default `apply --mainnet` path (Enter, Enter) reaches the plan clarinet
+# computes FRESH from Clarinet.toml -- identical before and after this
+# archive (sha256 217564c42bea...). -d is the one place #74 changed anything:
+# it panicked before signing pre-#74 (any key but SP3TGRVG...), and since #74
+# it reaches that same fresh plan and broadcasts it with no confirmation. At
+# the 2026-09-26 measurement, that plan had 57 contract publishes, 26 of them
+# from contracts/test/ (28 as of 2026-10-05's merges -- see
+# tests/mainnet-plan-guard.test.ts's KNOWN_TEST_PATHS for the live count, not
+# this snapshot), including every funds-bearing localized copy (whose
+# sbtc-token calls resolve, in that same plan, to the flash-mintable mock
+# contracts/sbtc-token.clar) plus test fixtures. 54 of the 57 names were free
+# at the current admin principal, including all five undeployed audit-track
+# successors. Pinned by tests/mainnet-plan-guard.test.ts (#76).
+# See CONTRACT_INVENTORY.md D5 and D6.
 #
 # Kept, not deleted, as the only record of what this key/era actually
 # published — nothing else in the repo documents it.
