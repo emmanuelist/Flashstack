@@ -249,15 +249,24 @@ function fetchLazerFeeds(feedIds) {
 
 async function fetchLazerPrices() {
   if (!LAZER_TOKEN) {
-    console.error("ERROR: set LAZER_TOKEN to fetch live prices (free signup: pythdata.app)");
+    // Permanently fatal regardless of caller (one-shot script or a WATCH
+    // loop) -- no amount of retrying fixes a missing token, so hard-exit
+    // immediately rather than loop forever on a config error.
+    console.error("ERROR: set LAZER_TOKEN to fetch live prices (free signup: app.pyth.com)");
     process.exit(1);
   }
   const got = {};
   try {
     Object.assign(got, await fetchLazerFeeds([1, 7]));
   } catch (e) {
-    console.error(`ERROR: Lazer feeds 1/7 (sBTC/USDC) unavailable: ${e.message}`);
-    process.exit(1);
+    // Thrown, not process.exit(1) -- this one IS transient (a Lazer
+    // websocket timeout/connectivity blip), confirmed live: it killed an
+    // entire WATCH-mode keeper process outright, bypassing that loop's own
+    // try/catch entirely since process.exit() isn't a catchable error.
+    // The scanner's own one-shot main() still exits on this via its
+    // existing top-level `.catch(...) -> process.exit(1)` wrapper, so
+    // this preserves that behavior while letting a loop retry instead.
+    throw new Error(`Lazer feeds 1/7 (sBTC/USDC) unavailable: ${e.message}`);
   }
   return got;
 }
