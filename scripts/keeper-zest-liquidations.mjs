@@ -43,27 +43,35 @@
  *   - zest-v2-liquidation-receiver is NOT YET DEPLOYED (PR #98, open).
  *   - Mode 4 prices wSTX debt via Lazer feed 45 (STX); the active Lazer
  *     plan (Demo) does not grant that feed -- confirmed directly, see
- *     project memory. Mode 5 only needs feed 1 (sBTC), which Demo grants,
- *     so it's not blocked by this.
+ *     project memory. Gated behind FEED_45_AVAILABLE (default false) so
+ *     the keeper skips mode 4 candidates entirely rather than arming a
+ *     target it then can't fetch a feed for. Mode 5 only needs feed 1
+ *     (sBTC), which Demo grants, so it's not gated.
  *   - The current live scan (scan-zest-positions.mjs) finds 0 liquidatable
  *     accounts -- this keeper has nothing to act on today regardless.
  *
  * Usage:
  *   LAZER_TOKEN="..." node scripts/keeper-zest-liquidations.mjs                  -- single scan
  *   WATCH=true LAZER_TOKEN="..." node scripts/keeper-zest-liquidations.mjs       -- loop every INTERVAL_MS, same shape as monitor-alex-arb.mjs
- *   EXECUTE=true WATCH=true LAZER_TOKEN="..." DEPLOYER_MNEMONIC="..." node scripts/keeper-zest-liquidations.mjs
+ *   EXECUTE=true WATCH=true LAZER_TOKEN="..." KEEPER_MNEMONIC="..." node scripts/keeper-zest-liquidations.mjs
  *
  * Environment variables:
  *   LAZER_TOKEN         — required (same account used by the scanner, for sBTC/USDC feeds)
  *   WATCH               — "true" to loop forever instead of scanning once (default: single scan)
  *   INTERVAL_MS         — loop interval in ms when WATCH=true (default: 300000 = 5 min)
- *   DEPLOYER_MNEMONIC   — 24-word mnemonic, must own the receiver contract (required for EXECUTE=true)
+ *   KEEPER_MNEMONIC     — 24-word mnemonic for the dedicated keeper wallet that OWNS the
+ *                         receiver contract (required for EXECUTE=true; renamed from
+ *                         DEPLOYER_MNEMONIC -- this should be a narrow keeper key, not the
+ *                         deployer's, per #98's ownership-handoff plan). Checked live against
+ *                         the receiver's own get-owner() before anything is broadcast.
+ *   FEED_45_AVAILABLE   — "true" once the Lazer plan is upgraded past Demo (default: false,
+ *                         mode 4 candidates are skipped, not attempted)
  *   EXECUTE             — "true" to broadcast real transactions (default: dry-run)
  *   MAX_ACCOUNTS        — cap accounts scanned, same as scan-zest-positions.mjs
  *   HIRO_API_KEY        — optional, raises the Hiro rate limit
  */
 
-import { Cl, makeContractCall, PostConditionMode, getAddressFromPrivateKey } from "@stacks/transactions";
+import { Cl, Pc, makeContractCall, PostConditionMode, getAddressFromPrivateKey } from "@stacks/transactions";
 import networkPkg from "@stacks/network";
 const { STACKS_MAINNET } = networkPkg;
 import walletPkg from "@stacks/wallet-sdk";
@@ -78,22 +86,25 @@ import {
   lookup,
   maskHasDebt,
   evaluateAccount,
+  readOnly,
+  uw,
 } from "./scan-zest-positions.mjs";
 
 const API      = "https://api.hiro.so";
 const EXPLORER = "https://explorer.hiro.so/txid";
 const network  = STACKS_MAINNET;
 
-const MNEMONIC      = process.env.DEPLOYER_MNEMONIC;
-const EXECUTE       = process.env.EXECUTE === "true";
-const LAZER_TOKEN   = process.env.LAZER_TOKEN;
-const MAX_ACCOUNTS  = process.env.MAX_ACCOUNTS;
-const HIRO_API_KEY  = process.env.HIRO_API_KEY;
-const WATCH         = process.env.WATCH === "true";
-const INTERVAL_MS   = parseInt(process.env.INTERVAL_MS ?? "300000"); // 5 min default -- a full scan is 1,334 accounts, no reason to hammer Hiro faster
+const MNEMONIC          = process.env.KEEPER_MNEMONIC;
+const EXECUTE           = process.env.EXECUTE === "true";
+const LAZER_TOKEN       = process.env.LAZER_TOKEN;
+const MAX_ACCOUNTS      = process.env.MAX_ACCOUNTS;
+const HIRO_API_KEY      = process.env.HIRO_API_KEY;
+const WATCH             = process.env.WATCH === "true";
+const INTERVAL_MS       = parseInt(process.env.INTERVAL_MS ?? "300000"); // 5 min default -- a full scan is 1,334 accounts, no reason to hammer Hiro faster
+const FEED_45_AVAILABLE = process.env.FEED_45_AVAILABLE === "true";
 
 if (EXECUTE && !MNEMONIC) {
-  console.error("ERROR: EXECUTE=true requires DEPLOYER_MNEMONIC (must own the receiver contract)");
+  console.error("ERROR: EXECUTE=true requires KEEPER_MNEMONIC (must own the receiver contract)");
   process.exit(1);
 }
 
@@ -103,6 +114,17 @@ const RECEIVER_NAME  = "zest-v2-liquidation-receiver";
 const RECEIVER       = `${DEPLOYER}.${RECEIVER_NAME}`;
 const STX_CORE_NAME  = "flashstack-stx-core";
 const SBTC_CORE_NAME = "flashstack-sbtc-core";
+const SBTC_ID        = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
+const SBTC_ASSET     = "sbtc-token";
+
+// The three fees already used below, named so the profit floor (set once
+// per scan pass, see setMinProfitFloors) can't silently drift out of sync
+// with what an attempt actually costs.
+const FEE_SET_TARGET = 50_000n;
+const FEE_SET_FEED   = 50_000n;
+const FEE_FLASH      = 300_000n;
+const FEE_TOTAL_USTX = FEE_SET_TARGET + FEE_SET_FEED + FEE_FLASH; // ~0.4 STX/attempt
+const MIN_PROFIT_MARGIN_USTX = FEE_TOTAL_USTX * 2n; // require profit to clear 2x the attempt's own gas cost
 
 // "<collateral-asset-id>:<debt-asset-id>" -> receiver mode. Only modes
 // 4/5 -- modes 1-3 need a sBTC->STX swap route that doesn't exist right
@@ -154,13 +176,21 @@ function fetchLazerEvmBuffer(feedIds) {
     process.once("unhandledRejection", unhandled);
     const timer = setTimeout(() => { cleanup(); reject(new Error("timed out waiting for Lazer evm buffer " + feedIds)); }, 15000);
 
+    // error/warn/onError used to be muted entirely, same bug fixed in the
+    // scanner's fetchLazerFeeds -- it hid the real cause of a connection
+    // failure (auth rejection, DNS, TLS, protocol-level issue) behind a
+    // generic "timed out" message. Left debug/info muted (too noisy).
     PythLazerClient.create({
       token: LAZER_TOKEN,
-      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      logger: {
+        debug: () => {}, info: () => {},
+        warn: (...a) => console.error("  [Lazer warn]", ...a),
+        error: (...a) => console.error("  [Lazer error]", ...a),
+      },
       webSocketPoolConfig: {
         urls: ["wss://pyth-lazer-0.dourolabs.app/v1/stream"],
         numConnections: 1,
-        onError: () => {},
+        onError: (e) => console.error("  [Lazer pool onError]", e?.message ?? e),
       },
     }).then((c) => {
       client = c;
@@ -186,6 +216,12 @@ function fetchLazerEvmBuffer(feedIds) {
         jsonBinaryEncoding: "hex",
         channel: "fixed_rate@200ms",
       });
+    }).catch((e) => {
+      // Explicit catch on PythLazerClient.create() itself, not just the
+      // unhandledRejection safety net above -- same fix as the scanner's
+      // fetchLazerFeeds, more direct, same reject path.
+      cleanup();
+      reject(e);
     });
   });
 }
@@ -204,30 +240,54 @@ async function broadcastOne(tx) {
   return typeof data === "string" ? data : data.txid;
 }
 
-// ── Execute one liquidation: set-target -> set-price-feed -> flash-loan ───
-async function executeLiquidation(candidate, decision) {
-  const wallet = await generateWallet({ secretKey: MNEMONIC, password: "" });
-  const pk     = wallet.accounts[0].stxPrivateKey;
-  const signer = getAddressFromPrivateKey(pk, "mainnet");
-  let   nonce  = await fetch(`${API}/v2/accounts/${signer}?proof=0`).then(r => r.json()).then(d => d.nonce);
+// Hiro's "confirmed nonce" (/v2/accounts) only reflects anchored state --
+// re-reading it for a second candidate in the same pass collides with the
+// first candidate's still-pending transactions. possible_next_nonce
+// accounts for mempool-pending txs too, and the caller carries it forward
+// locally across every tx in the pass rather than re-fetching.
+async function getPossibleNextNonce(address) {
+  const res = await fetch(`${API}/extended/v1/address/${address}/nonces`).then((r) => r.json());
+  return res.possible_next_nonce;
+}
 
-  const debtAmount = decision.topDebt.actual;
+// Sets both profit floors once per scan pass (they're standing receiver
+// vars, not reset after use -- no need to repeat this per candidate).
+// Converts the same ~0.4 STX/attempt gas cost into both STX and sBTC
+// terms at current prices, with a 2x margin, so a liquidation smaller
+// than what it costs to run can't execute at a net loss. The contract
+// default (u1, "any nonzero profit") is otherwise far too permissive.
+async function setMinProfitFloors(pk, nonce, prices) {
+  const stxPrice1e8  = prices[0]; // wstx, USD x 1e8 per whole STX
+  const sbtcPrice1e8 = prices[2]; // sbtc-token, USD x 1e8 per whole sBTC
+  const feeUsdX1e8   = (MIN_PROFIT_MARGIN_USTX * stxPrice1e8) / 1_000_000n; // wstx: 6 decimals
+  const minProfitSbtc = (feeUsdX1e8 * 100_000_000n) / sbtcPrice1e8;         // sbtc: 8 decimals
 
-  // 4th arg (amount) is the exact flash-loan size this liquidation is
-  // armed for -- the receiver's own execute-stx-flash/execute-sbtc-flash
-  // now assert the real flash-loan amount matches this exactly
-  // (ERR-AMOUNT-MISMATCH otherwise), closing the gap where
-  // flashstack-stx-core.flash-loan has no caller restriction at all and
-  // anyone could otherwise fire an already-armed target with an amount
-  // of their own choosing (see the receiver's own header SECURITY note).
-  console.log(`  1/3 set-target(${candidate.account}, ${debtAmount}, mode ${decision.mode}, amount ${decision.loanAmount})`);
-  const setTargetTx = await makeContractCall({
-    contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-target",
-    functionArgs: [Cl.principal(candidate.account), Cl.uint(debtAmount), Cl.uint(decision.mode), Cl.uint(decision.loanAmount)],
-    senderKey: pk, network, postConditionMode: PostConditionMode.Allow, anchorMode: 1, nonce, fee: 50_000,
+  console.log(`  Setting profit floors: min-profit-stx=${MIN_PROFIT_MARGIN_USTX} uSTX, min-profit-sbtc=${minProfitSbtc} sats (2x this pass's ~${FEE_TOTAL_USTX} uSTX gas cost)`);
+
+  const tx1 = await makeContractCall({
+    contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-min-profit-stx",
+    functionArgs: [Cl.uint(MIN_PROFIT_MARGIN_USTX)],
+    senderKey: pk, network, postConditionMode: PostConditionMode.Deny, anchorMode: 1, nonce, fee: FEE_SET_TARGET,
   });
-  console.log(`      ${EXPLORER}/0x${await broadcastOne(setTargetTx)}?chain=mainnet`);
+  console.log(`    ${EXPLORER}/0x${await broadcastOne(tx1)}?chain=mainnet`);
   nonce += 1;
+
+  const tx2 = await makeContractCall({
+    contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-min-profit-sbtc",
+    functionArgs: [Cl.uint(minProfitSbtc)],
+    senderKey: pk, network, postConditionMode: PostConditionMode.Deny, anchorMode: 1, nonce, fee: FEE_SET_TARGET,
+  });
+  console.log(`    ${EXPLORER}/0x${await broadcastOne(tx2)}?chain=mainnet`);
+  nonce += 1;
+  return nonce;
+}
+
+// ── Execute one liquidation: fetch feed -> set-target -> set-price-feed -> flash-loan ──
+// pk/signer are derived once per scan pass (see scan()), not re-derived
+// here; nonce is threaded through so a second candidate in the same pass
+// continues from where the first one left off instead of colliding.
+async function executeLiquidation(pk, signer, nonce, candidate, decision) {
+  const debtAmount = decision.topDebt.actual;
 
   // Feeds needed = union of this account's actual collateral + debt price
   // sources (NOT just this pair) -- liquidate() reprices the WHOLE
@@ -239,34 +299,65 @@ async function executeLiquidation(candidate, decision) {
     if (asset && LAZER_FEED_BY_SOURCE[asset.priceSource]) sources.add(LAZER_FEED_BY_SOURCE[asset.priceSource]);
   }
   const feedIds = [...sources];
-  console.log(`  2/3 fetching fresh signed Lazer update for feeds [${feedIds.join(", ")}]...`);
+
+  // Fetch the feed BEFORE arming, not after -- set-target used to broadcast
+  // first, so a feed fetch that timed out (or, for mode 4, was never going
+  // to succeed on the Demo plan) left the receiver armed with a target and
+  // nothing behind it, paying set-target's fee for nothing every cycle.
+  console.log(`  1/3 fetching fresh signed Lazer update for feeds [${feedIds.join(", ")}]...`);
   const evmHex = await fetchLazerEvmBuffer(feedIds);
+
+  // 4th arg (amount) is the exact flash-loan size this liquidation is
+  // armed for -- the receiver's own execute-stx-flash/execute-sbtc-flash
+  // now assert the real flash-loan amount matches this exactly
+  // (ERR-AMOUNT-MISMATCH otherwise), closing the gap where
+  // flashstack-stx-core.flash-loan has no caller restriction at all and
+  // anyone could otherwise fire an already-armed target with an amount
+  // of their own choosing (see the receiver's own header SECURITY note).
+  // Deny mode, no conditions -- neither call moves any asset, so any
+  // unexpected transfer here should abort the tx rather than be allowed.
+  console.log(`  2/3 set-target(${candidate.account}, ${debtAmount}, mode ${decision.mode}, amount ${decision.loanAmount})`);
+  const setTargetTx = await makeContractCall({
+    contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-target",
+    functionArgs: [Cl.principal(candidate.account), Cl.uint(debtAmount), Cl.uint(decision.mode), Cl.uint(decision.loanAmount)],
+    senderKey: pk, network, postConditionMode: PostConditionMode.Deny, anchorMode: 1, nonce, fee: FEE_SET_TARGET,
+  });
+  console.log(`      ${EXPLORER}/0x${await broadcastOne(setTargetTx)}?chain=mainnet`);
+  nonce += 1;
+
   const setFeedTx = await makeContractCall({
     contractAddress: DEPLOYER, contractName: RECEIVER_NAME, functionName: "set-price-feed",
     functionArgs: [Cl.bufferFromHex(evmHex)],
-    senderKey: pk, network, postConditionMode: PostConditionMode.Allow, anchorMode: 1, nonce, fee: 50_000,
+    senderKey: pk, network, postConditionMode: PostConditionMode.Deny, anchorMode: 1, nonce, fee: FEE_SET_FEED,
   });
   console.log(`      ${EXPLORER}/0x${await broadcastOne(setFeedTx)}?chain=mainnet`);
   nonce += 1;
 
   const loanAmount = decision.loanAmount;
   const coreName   = decision.core === "sbtc" ? SBTC_CORE_NAME : STX_CORE_NAME;
-  const flashFn    = "flash-loan";
-  console.log(`  3/3 ${coreName}.${flashFn}(${loanAmount}, ${RECEIVER_NAME})`);
+  // The receiver repays the core from ITS OWN balance via as-contract; the
+  // signer should never send any STX/sBTC out of their own wallet as part
+  // of this call, only pay the tx fee. Allow mode (the internal transfers
+  // the loan itself makes are expected and fine) plus one explicit
+  // zero-send condition on the signer catches a buggy or compromised
+  // receiver trying to pull funds from the signer's wallet directly.
+  const zeroSendPc = decision.core === "sbtc"
+    ? Pc.principal(signer).willSendEq(0).ft(SBTC_ID, SBTC_ASSET)
+    : Pc.principal(signer).willSendEq(0).ustx();
+  console.log(`  3/3 ${coreName}.flash-loan(${loanAmount}, ${RECEIVER_NAME})`);
   const flashTx = await makeContractCall({
-    contractAddress: DEPLOYER, contractName: coreName, functionName: flashFn,
+    contractAddress: DEPLOYER, contractName: coreName, functionName: "flash-loan",
     functionArgs: [Cl.uint(loanAmount), Cl.contractPrincipal(DEPLOYER, RECEIVER_NAME)],
-    senderKey: pk, network, postConditionMode: PostConditionMode.Allow, anchorMode: 1, nonce, fee: 300_000,
+    senderKey: pk, network, postConditionMode: PostConditionMode.Allow, postConditions: [zeroSendPc], anchorMode: 1, nonce, fee: FEE_FLASH,
   });
-  let txid;
+  let txid = null;
   try {
     txid = await broadcastOne(flashTx);
+    console.log(`      Broadcast: ${EXPLORER}/0x${txid}?chain=mainnet`);
   } catch (e) {
     console.error(`      FAILED: ${e.message}`);
-    return null;
   }
-  console.log(`      Broadcast: ${EXPLORER}/0x${txid}?chain=mainnet`);
-  return txid;
+  return { txid, nonce: nonce + 1 };
 }
 
 // ── Decide the loan amount for a mapped mode ───────────────────────────────
@@ -287,25 +378,50 @@ async function scan() {
   console.log(`Scanning ${nr}${nr < realNr ? ` of ${realNr}` : ""} registered accounts...`);
 
   const candidates = [];
+  let failed = 0;
   for (let id = 0n; id < nr; id++) {
-    const entry = await lookup(id);
-    if (!entry) continue;
-    const mask = BigInt(entry.mask.value);
-    if (!maskHasDebt(mask)) continue;
-    const account = entry.account.value;
+    // lookup() and evaluateAccount() share one try/catch -- lookup() now
+    // throws on failure instead of returning null (same fix as the
+    // scanner's main loop: a lookup failure is always a network/parse
+    // issue, never a legitimate "no entry", and must be counted here
+    // rather than silently `continue`-ing with no record of it).
     try {
+      const entry = await lookup(id);
+      const mask = BigInt(entry.mask.value);
+      if (!maskHasDebt(mask)) continue;
+      const account = entry.account.value;
       const result = await evaluateAccount(id, account, mask, prices);
       if (result?.liquidatable) candidates.push(result);
     } catch (e) {
-      console.error(`  WARN: account ${id} failed to evaluate, skipped: ${e.message}`);
+      failed++;
+      console.error(`\n  WARN: account ${id} failed to evaluate, skipped: ${e.message}`);
     }
     if (id % 100n === 0n) process.stdout.write(`\r  ...${id}/${nr}`);
   }
-  console.log(`\r  done: ${candidates.length} liquidatable candidate(s) found`);
+  console.log(`\r  done: ${candidates.length} liquidatable candidate(s) found, ${failed} failed`);
 
   if (candidates.length === 0) {
     console.log("No liquidatable accounts right now.");
     return 0;
+  }
+
+  // Signer, owner check, and starting nonce are all done ONCE per pass,
+  // not per candidate -- re-deriving them per candidate was also what led
+  // to the per-candidate nonce re-read that collided across candidates.
+  let pk, signer, nonce;
+  if (EXECUTE) {
+    const wallet = await generateWallet({ secretKey: MNEMONIC, password: "" });
+    pk     = wallet.accounts[0].stxPrivateKey;
+    signer = getAddressFromPrivateKey(pk, "mainnet");
+
+    const owner = uw(await readOnly(RECEIVER, "get-owner", []));
+    if (owner !== signer) {
+      console.error(`  ABORT: KEEPER_MNEMONIC signs as ${signer}, but the receiver's owner is ${owner}. Refusing to arm anything with a key that isn't actually the owner.`);
+      return 0;
+    }
+
+    nonce = await getPossibleNextNonce(signer);
+    nonce = await setMinProfitFloors(pk, nonce, prices);
   }
 
   let actionable = 0;
@@ -313,7 +429,14 @@ async function scan() {
     console.log(`\n--- ${candidate.account} ---`);
     console.log(`  collateral-usd: $${(Number(candidate.collateralUsd) / 1e8).toFixed(2)}  debt-usd: $${(Number(candidate.debtUsd) / 1e8).toFixed(2)}`);
 
-    const decision = pickMode(candidate);
+    let decision = pickMode(candidate);
+    // Mode 4 needs Lazer feed 45, which the active Demo plan doesn't
+    // grant -- skip it outright rather than arm set-target and then fail
+    // to fetch a feed for it (that used to cost a wasted set-target fee
+    // every cycle; see executeLiquidation's feed-before-arm fix too).
+    if (!decision.unsupported && NEEDS_STX_FEED_MODES.has(decision.mode) && !FEED_45_AVAILABLE) {
+      decision = { unsupported: true, reason: `mode ${decision.mode} needs Lazer feed 45, not available on the current Demo plan (see project memory; set FEED_45_AVAILABLE=true once upgraded)` };
+    }
     if (decision.unsupported) {
       console.log(`  SKIP -- ${decision.reason}`);
       continue;
@@ -326,15 +449,12 @@ async function scan() {
     console.log(`  *** LIQUIDATION OPPORTUNITY *** ${candidate.account} -- mode ${decision.mode} (${decision.label})`);
     console.log(`  Target debt: ${decision.topDebt.actual} raw units of ${decision.topDebt.asset}`);
     console.log(`  Loan size:   ${decision.loanAmount} ${decision.core === "sbtc" ? "sat sBTC" : "microSTX"} (exact -- no-swap mode)`);
-    if (NEEDS_STX_FEED_MODES.has(decision.mode)) {
-      console.log(`  NOTE: mode ${decision.mode} prices wSTX debt via Lazer feed 45 (STX) -- blocked on`);
-      console.log(`        the current Demo plan's entitlement gap (see project memory).`);
-    }
 
     if (EXECUTE) {
-      await executeLiquidation(candidate, decision);
+      const result = await executeLiquidation(pk, signer, nonce, candidate, decision);
+      nonce = result.nonce;
     } else {
-      console.log(`  (dry-run -- set EXECUTE=true DEPLOYER_MNEMONIC="..." to trigger)`);
+      console.log(`  (dry-run -- set EXECUTE=true KEEPER_MNEMONIC="..." to trigger)`);
     }
   }
   return actionable;
