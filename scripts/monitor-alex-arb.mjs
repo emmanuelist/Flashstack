@@ -199,15 +199,62 @@ async function checkAlexArb(loanMicro) {
   };
 }
 
+// ── Broadcast one signed tx, return its txid ────────────────────────────────────
+async function broadcastOne(tx) {
+  const raw  = tx.serialize();
+  const body = typeof raw === "string" ? Buffer.from(raw.replace(/^0x/, ""), "hex") : raw;
+  const res  = await fetch(`${API}/v2/transactions`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error(`Non-JSON: ${text.slice(0, 200)}`); }
+  if (data?.error) throw new Error(`${data.error} -- ${data.reason ?? ""}`);
+  return typeof data === "string" ? data : data.txid;
+}
+
 // ── Execute flash loan ────────────────────────────────────────────────────────
-async function executeAlexArb(loanMicro) {
+// alex-arb-receiver-v5 requires min-alex-out to be freshly set before every
+// call -- it auto-resets to 0 after each use specifically to force
+// re-calibration, so a flash-loan call alone (with no prior set-min-alex-out)
+// either reverts with ERR-MIN-ALEX-UNSET, or -- if a stale nonzero value is
+// still sitting there from an earlier run -- fails Leg 1's own slippage
+// check against whatever the CURRENT quote actually is. Confirmed live:
+// min-alex-out on-chain right now is a leftover value from some earlier
+// setup (6,890,524,177,442), unrelated to this script's current LOAN_STX.
+async function executeAlexArb(loanMicro, alexOut) {
   const wallet = await generateWallet({ secretKey: MNEMONIC, password: "" });
   const pk     = wallet.accounts[0].stxPrivateKey;
   // Signer address is derived from the mnemonic -- after the 2026-06-12 wallet
-  // rotation this is no longer the contract deployer address
+  // rotation this is no longer the contract deployer address. Must be
+  // alex-arb-receiver-v5's current contract-owner (confirmed live:
+  // SPR9PQAN..., the rotated admin wallet) or set-min-alex-out below fails
+  // with ERR-NOT-OWNER before the flash loan is ever attempted.
   const signer = getAddressFromPrivateKey(pk, "mainnet");
-  const nonce  = await fetch(`${API}/v2/accounts/${signer}?proof=0`)
+  let   nonce  = await fetch(`${API}/v2/accounts/${signer}?proof=0`)
     .then(r => r.json()).then(d => d.nonce);
+
+  // 1% slippage tolerance off the quote this same scan just fetched --
+  // matches the receiver's own min-profit/max-fee-bp philosophy of a real,
+  // computed guard rather than an arbitrary placeholder.
+  const minAlexOut = (alexOut * 99n) / 100n;
+  console.log(`  Setting min-alex-out: ${Number(minAlexOut) / 1e8} ALEX (1% below quoted ${Number(alexOut) / 1e8})`);
+
+  const setMinTx = await makeContractCall({
+    contractAddress:   DEPLOYER,
+    contractName:      "alex-arb-receiver-v5",
+    functionName:      "set-min-alex-out",
+    functionArgs:      [Cl.uint(minAlexOut)],
+    senderKey:         pk,
+    network,
+    postConditionMode: PostConditionMode.Allow,
+    anchorMode:        1,
+    nonce,
+    fee:               50_000,
+  });
+  const setMinTxid = await broadcastOne(setMinTx);
+  console.log(`  set-min-alex-out broadcast: ${EXPLORER}/0x${setMinTxid}?chain=mainnet`);
+  nonce += 1;
 
   console.log(`  Executing ${loanMicro / 1e6} STX ALEX arb flash loan...`);
 
@@ -224,21 +271,13 @@ async function executeAlexArb(loanMicro) {
     fee:               300_000,
   });
 
-  const raw  = tx.serialize();
-  const body = typeof raw === "string" ? Buffer.from(raw.replace(/^0x/, ""), "hex") : raw;
-  const res  = await fetch(`${API}/v2/transactions`, {
-    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
-  });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { throw new Error(`Non-JSON: ${text.slice(0, 200)}`); }
-
-  if (data?.error) {
-    console.error(`  FAILED: ${data.error} -- ${data.reason ?? ""}`);
+  let txid;
+  try {
+    txid = await broadcastOne(tx);
+  } catch (e) {
+    console.error(`  FAILED: ${e.message}`);
     return null;
   }
-
-  const txid = typeof data === "string" ? data : data.txid;
   console.log(`  Broadcast: ${txid}`);
   console.log(`  Explorer:  ${EXPLORER}/0x${txid}?chain=mainnet`);
   return txid;
@@ -282,7 +321,7 @@ async function scan() {
     console.log(`\n  *** ARB OPPORTUNITY *** +${profitStx.toFixed(4)} STX`);
     console.log(`  ALEX trading above fair value — round-trip profitable`);
     if (EXECUTE) {
-      await executeAlexArb(arb.loanMicro);
+      await executeAlexArb(arb.loanMicro, arb.alexOut);
     } else {
       console.log(`  (dry-run -- set EXECUTE=true DEPLOYER_MNEMONIC="..." to trigger)`);
     }
