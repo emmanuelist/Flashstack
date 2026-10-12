@@ -49,7 +49,6 @@ const STAGEABLE = [
 
 /** Genuinely unstageable: real DeFi integrations with no testnet counterpart. */
 const NOT_STAGEABLE: Array<[string, string]> = [
-  ["zest-liquidation-receiver.clar", "SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N"], // Zest
   ["zest-v2-liquidation-receiver.clar", "SP2C2YFP12AJZB4MABJBAJ55XECVS7E4PMMZ89YZR"], // Arkadiko
   ["alex-arb-receiver-v5.clar", "SP102V8P0F7JX67ARQ77WEA3D3CFB5XW39REDT0AM"], // ALEX
 ];

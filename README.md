@@ -49,7 +49,7 @@ Fee: **0.05%** per loan. Assets: **STX** and **canonical sBTC** (`SM3VDXK3WZZSA8
 | [`flashstack-sbtc-core`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core?chain=mainnet) | Canonical sBTC flash-loan engine |
 | [`bitflow-arb-receiver-v4`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) | Bitflow STX/stSTX arbitrage |
 | [`velar-sbtc-arb-receiver`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver?chain=mainnet) | Velar wSTX↔sBTC arbitrage |
-| [`zest-liquidation-receiver`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.zest-liquidation-receiver?chain=mainnet) | Zero-capital Zest liquidator (4 modes) |
+| [`zest-v2-liquidation-receiver`](contracts/zest-v2-liquidation-receiver.clar) | Zero-capital Zest liquidator, v0-8-market (5 modes) — **not yet deployed** |
 | [`alex-arb-receiver-v2`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.alex-arb-receiver-v2?chain=mainnet) | ALEX STX/ALEX arbitrage |
 | `stx-test-receiver` / `sbtc-test-receiver` | Minimal borrow-and-repay receivers |
 

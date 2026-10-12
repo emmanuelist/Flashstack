@@ -267,14 +267,25 @@ Borrow the debt amount, call the lending protocol's liquidation function, receiv
 
 **Pattern (STX debt, STX collateral):**
 ```clarity
+;; Hardcoded, not the caller-supplied `core` parameter -- F-10 (docs/security/FINDINGS_REGISTER.md)
+;; was exactly this: a receiver with no contract-caller check that repaid
+;; to whatever `core` the caller passed in, letting anyone call
+;; execute-stx-flash directly (not through a real flash loan) and redirect
+;; the receiver's own balance. `core` is still accepted as a parameter for
+;; trait compliance, but never trusted.
+(define-constant FLASH-CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
+
 (define-public (execute-stx-flash (amount uint) (core principal))
   (let (
-    (fee-bp    (unwrap! (contract-call? 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core
-                  get-fee-basis-points) ERR-REPAY))
+    (fee-bp    (unwrap! (contract-call? FLASH-CORE get-fee-basis-points) ERR-REPAY))
     (raw-fee   (/ (* amount fee-bp) u10000))
     (fee       (if (> raw-fee u0) raw-fee u1))
     (total-owed (+ amount fee))
   )
+    ;; Only FLASH-CORE may invoke this callback
+    (asserts! (is-eq contract-caller FLASH-CORE) ERR-NOT-CORE)
+    (asserts! (is-eq core FLASH-CORE) ERR-NOT-CORE) ;; defense-in-depth
+
     ;; Repay borrower's debt to the lending protocol
     (unwrap! (as-contract
       (contract-call? 'LENDING-PROTOCOL liquidation-call
@@ -288,14 +299,14 @@ Borrow the debt amount, call the lending protocol's liquidation function, receiv
     ;; If collateral is another token: swap it first, then repay.
     (let ((stx-now (stx-get-balance (as-contract tx-sender))))
       (asserts! (>= stx-now total-owed) ERR-NO-PROFIT)
-      (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) ERR-REPAY)
+      (unwrap! (as-contract (stx-transfer? total-owed tx-sender FLASH-CORE)) ERR-REPAY)
       (ok true)
     )
   )
 )
 ```
 
-Source: [contracts/zest-liquidation-receiver.clar](../contracts/zest-liquidation-receiver.clar)
+Source: [contracts/zest-v2-liquidation-receiver.clar](../contracts/zest-v2-liquidation-receiver.clar) (not yet deployed — targets the live `v0-8-market`; also needs a real signed Pyth Lazer price feed threaded through on v0-8, see the contract's own header)
 
 ---
 
