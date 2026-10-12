@@ -47,6 +47,10 @@ audit scope, and a decision for Matt — not something to change unilaterally.
 | Gate who may borrow | `add-approved-receiver` / `remove-approved-receiver` | cores + pools |
 | Hand over control | `transfer-admin` (`set-admin` on `flashstack-sbtc-core`) | cores + pools |
 
+Before any `add-approved-receiver` call, the candidate must pass
+[RECEIVER_VETTING.md](RECEIVER_VETTING.md). This table records who may make the call;
+that checklist records how a candidate is vetted.
+
 **Cannot:** mint, alter an in-flight loan, seize LP shares, or withdraw LP deposits.
 LP `withdraw` is **not** admin-gated — verified by reading the deployed source of
 `flashstack-stx-pool-v2`, where `withdraw` asserts only on the caller's own share
