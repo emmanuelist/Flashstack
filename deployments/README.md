@@ -4,7 +4,7 @@
 
 **Never run `clarinet deployments apply --mainnet` from this repository, with or
 without `-d`.** Until D6 (`docs/security/CONTRACT_INVENTORY.md` §7.3) is fixed, the
-plan `clarinet` computes from the current `Clarinet.toml` publishes 57 contracts, 26
+plan `clarinet` computes from the current `Clarinet.toml` publishes 57 contracts, 30
 of them from `contracts/test/` — localized copies and test fixtures, not canonical
 sources. That includes the five undeployed audit-track successors
 (`flashstack-pool-v3`, `flashstack-stx-pool-v3`, `flashstack-sbtc-pool-v3`,
@@ -20,7 +20,7 @@ both wrong, and what running clarinet for real (in an isolated container) actual
 showed.
 
 Guarded in CI by `tests/mainnet-plan-guard.test.ts` (#76): it fails if the known set
-of 26 `contracts/test/` publishes changes in either direction, and carries the real
+of 30 `contracts/test/` publishes changes in either direction, and carries the real
 target — zero `contracts/test/` paths in the plan — as an expected failure until D6
 lands.
 
