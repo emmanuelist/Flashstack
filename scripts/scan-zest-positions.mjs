@@ -172,9 +172,16 @@ export async function readOnly(contract, fn, args, attempt = 0) {
     }
     throw new Error(`${contract}.${fn}: non-JSON response after retries: ${text.slice(0, 200)}`);
   }
-  if (!res.okay) throw new Error(`${contract}.${fn} failed: ${JSON.stringify(res)}`);
+  if (!res.okay) throw new NoEntryError(`${contract}.${fn} failed: ${JSON.stringify(res)}`);
   return cvToValue(hexToCV(res.result), true);
 }
+
+// Distinguishes a genuine Clarity-level "no entry" response (res.okay ===
+// false -- e.g. an account holding no position in a given asset) from a
+// network/parse failure that exhausted readOnly's own retries. Only the
+// former is safe for a caller to treat as "zero"; the latter must propagate
+// so it's counted as a failed evaluation, not silently priced as empty.
+class NoEntryError extends Error {}
 
 // cvToValue(cv, true)'s envelope behavior is genuinely inconsistent and
 // confirmed empirically against live calls, not assumed: a value that's
@@ -369,12 +376,13 @@ export async function getNr() {
 
 // Normalized here so callers can always do entry.mask.value / entry.account.value
 // regardless of whether this particular call happened to come back enveloped.
+// Unlike getCollateral/getDebtScaled, there is no legitimate "no entry"
+// case here -- every id in [0, get-nr()) is guaranteed to have a lookup
+// entry by construction. A failure is always a network/parse issue, so it
+// propagates rather than being swallowed, letting the caller count it as a
+// failed account instead of silently dropping it with no record at all.
 export async function lookup(id) {
-  try {
-    return uw(await readOnly(VAULT, "lookup", [cvToHex(Cl.uint(id))]));
-  } catch {
-    return null;
-  }
+  return uw(await readOnly(VAULT, "lookup", [cvToHex(Cl.uint(id))]));
 }
 
 export function maskHasDebt(mask) {
@@ -394,17 +402,28 @@ export function maskAssetIds(mask, offset) {
 // the account has no entry at all for that specific asset id -- shouldn't
 // happen given callers only query asset ids present in the account's own
 // mask, but treated as 0 defensively rather than crashing the whole scan.
+// Only NoEntryError (readOnly's res.okay === false case) is safe to treat
+// as 0 -- a network/parse failure that exhausted readOnly's own retries
+// must propagate instead of silently pricing this leg as empty, which
+// would otherwise push a healthy account's LTV to 100% and flag it as
+// liquidatable.
 export async function getCollateral(id, assetId) {
   try {
     const v = await readOnly(VAULT, "get-collateral", [cvToHex(Cl.uint(id)), cvToHex(Cl.uint(assetId))]);
     return BigInt(uw(v));
-  } catch { return 0n; }
+  } catch (e) {
+    if (e instanceof NoEntryError) return 0n;
+    throw e;
+  }
 }
 export async function getDebtScaled(id, assetId) {
   try {
     const v = await readOnly(VAULT, "get-debt", [cvToHex(Cl.uint(id)), cvToHex(Cl.uint(assetId))]);
     return BigInt(uw(v).scaled.value);
-  } catch { return 0n; }
+  } catch (e) {
+    if (e instanceof NoEntryError) return 0n;
+    throw e;
+  }
 }
 export async function getCachedIndex(assetId) {
   const v = await readOnly(MARKET, "get-cached-indexes", [cvToHex(Cl.uint(assetId))]);
@@ -486,21 +505,25 @@ async function main() {
   const candidates = [];
   let checked = 0, skippedNoDebt = 0, failed = 0;
   for (let id = 0n; id < nr; id++) {
-    const entry = await lookup(id);
-    if (!entry) continue;
-    const mask = BigInt(entry.mask.value);
-    if (!maskHasDebt(mask)) { skippedNoDebt++; continue; }
-    checked++;
-    const account = entry.account.value;
-    // A single account failing after readOnly's own retries are exhausted
-    // (e.g. a sustained outage mid-scan) shouldn't discard progress on the
-    // other 1,333 -- logged and skipped, not fatal.
+    let account;
+    // lookup() and evaluateAccount() share one try/catch: a lookup failure
+    // (always a network/parse issue -- see lookup's own comment) is just as
+    // much a failed-to-evaluate account as an evaluateAccount failure, and
+    // must be counted the same way rather than silently dropped via `continue`
+    // with no record. A single account failing after readOnly's own retries
+    // are exhausted (e.g. a sustained outage mid-scan) shouldn't discard
+    // progress on the other 1,333 -- logged and skipped, not fatal.
     try {
+      const entry = await lookup(id);
+      const mask = BigInt(entry.mask.value);
+      if (!maskHasDebt(mask)) { skippedNoDebt++; continue; }
+      checked++;
+      account = entry.account.value;
       const result = await evaluateAccount(id, account, mask, prices);
       if (result?.liquidatable) candidates.push(result);
     } catch (e) {
       failed++;
-      console.error(`\n  WARN: account ${id} (${account}) failed to evaluate, skipped: ${e.message}`);
+      console.error(`\n  WARN: account ${id}${account ? ` (${account})` : ""} failed to evaluate, skipped: ${e.message}`);
     }
     if (id % 100n === 0n) process.stdout.write(`\r  ...${id}/${nr}`);
   }
