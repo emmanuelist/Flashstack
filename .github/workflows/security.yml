@@ -25,21 +25,16 @@ jobs:
       # can't go red isn't evidence of anything. Dependency Audit is not a required
       # status check, so a red run here never blocks a merge; it is a signal.
       #
-      # Known accepted finding as of 2026-10-03: GHSA-vfj7-8cjw-p6xm (braces,
-      # stack-exhaustion DoS via deeply nested patterns), pulled in transitively via
-      # @clarigen/cli -> chokidar -> braces. @clarigen/cli is a devDependency (the
-      # Clarity-to-TypeScript codegen tool, `npm run gen`) -- never shipped, never
-      # reachable by anyone outside this repo's own `contracts/` tree, which is the
-      # only glob chokidar ever watches here. No upstream fix exists yet: braces'
-      # latest release (3.0.3) is still inside the advisory's vulnerable range, and
-      # `npm audit fix --force`'s only suggested remediation is downgrading
-      # @clarigen/cli to 0.2.4 -- a multi-major-version regression of an actively
-      # used dev tool to dodge a DoS risk this project's own usage can't trigger.
-      # Accepted deliberately, not silently: re-check `npm audit --audit-level=high`
-      # next time this step goes red, since a real upstream patch (or a new,
-      # unrelated finding worth acting on) would change this call.
+      # Runs through scripts/audit-allowlist.mjs rather than `npm audit
+      # --audit-level=high` directly: the accepted braces finding
+      # (GHSA-vfj7-8cjw-p6xm, see FINDINGS_REGISTER.md DEP-1) kept this red on
+      # every run regardless of anything else, including two separate NEW
+      # findings (source-map-js, sharp) that went unnoticed for a day because a
+      # permanently-red check stops getting read. The script fails only on a
+      # finding whose advisory ID isn't already an accepted, documented row in
+      # FINDINGS_REGISTER.md -- red now means something new. 2026-10-07.
       - name: Audit root dependencies
-        run: npm audit --audit-level=high
+        run: node scripts/audit-allowlist.mjs --audit-level=high
 
       # if: always() -- the step above can fail (by design, see its own comment),
       # and a failed step otherwise skips every step after it in the same job.
@@ -48,7 +43,7 @@ jobs:
       # with a real fix available -- see DEP-1/DEP-2). Found 2026-10-05.
       - name: Audit web dependencies
         if: always()
-        run: cd web && npm audit --audit-level=high
+        run: cd web && node ../scripts/audit-allowlist.mjs --audit-level=high
 
   codeql:
     name: CodeQL Analysis

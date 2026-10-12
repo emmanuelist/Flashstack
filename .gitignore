@@ -120,6 +120,10 @@ logs/
 nul
 tmpclaude-*
 
+# Claude Code local settings (machine-specific permissions, can contain
+# infrastructure details like SSH hosts -- never shared, unlike settings.json)
+.claude/settings.local.json
+
 # ============================================
 # Documentation Build
 # ============================================
