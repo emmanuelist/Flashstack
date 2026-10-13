@@ -1,10 +1,11 @@
 # Audit Scope — FlashStack `flashstack-pool-v3`
 
 **Purpose:** a scoping packet for a prospective Clarity auditor. Every figure below was
-checked against the repository or the live chain on **2026-09-21**; the checks are
+checked against the repository or the live chain on **2026-10-13** (refreshed from an
+earlier 2026-09-21 pass; see the changes noted inline below); the checks are
 named so they can be repeated. Where something is not done, it says so.
 
-**Reviewed state:** `main` @ `9210540`. The commit to audit will be frozen at kickoff.
+**Reviewed state:** `main` @ `c01886b`. The commit to audit will be frozen at kickoff.
 
 ## What this is
 
@@ -23,12 +24,24 @@ is meant to happen **before** any TVL.
 | **1 — primary** | `contracts/flashstack-v3-receiver-trait.clar` | 22 | 3 / 3.0 | Not deployed |
 | **2a — cores** | `flashstack-stx-core-v2.clar` | 230 | 3 / 3.0 | Staged on testnet, see below |
 | **2a — cores** | `flashstack-sbtc-core-v2.clar` | 224 | 3 / 3.0 | Not deployed |
-| **2b — pools** | `flashstack-stx-pool-v3.clar` | 306 | 3 / 3.0 | Not deployed |
-| **2b — pools** | `flashstack-sbtc-pool-v3.clar` | 336 | 3 / 3.0 | Not deployed |
+| **2b — pools** | `flashstack-stx-pool-v3.clar` | 337 | 3 / 3.0 | Not deployed |
+| **2b — pools** | `flashstack-sbtc-pool-v3.clar` | 368 | 3 / 3.0 | Not deployed |
 
 ¹ Physical lines (`wc -l`), comments and blank lines included. Tier 1 is **505**. Tier 2
-adds **1,096**: **454** in the cores (reserve model, no LP shares) and **642** in the pools
-(LP shares). Please quote Tier 1 alone and Tier 1 + 2, pricing 2a and 2b separately if you can.
+adds **1,159** (grew from 1,096 since this packet's first pass — see below): **454** in the
+cores (reserve model, no LP shares) and **705** in the pools (LP shares). Please quote Tier 1
+alone and Tier 1 + 2, pricing 2a and 2b separately if you can.
+
+**Why the two pools grew.** Both now carry a per-asset reentrancy lock
+(`reentrancy-locked`, shared by `deposit`, `withdraw` and `flash-loan`) that wasn't there at
+the first scoping pass. It closes the exact bug class this packet already flagged as a
+scrutiny priority below (`pv3-F1`) — since then, the same vulnerability was independently
+confirmed on the **live, immutable** v2 pools (`F-9`, out of scope here, but the reason this
+guard exists): a passing simnet proof measured a ~2,000x return on the attacker's own
+capital via deposit-reentrancy during a flash-loan callback, with the dormant live pools
+confirmed never having had a receiver approved (`FINDINGS_REGISTER.md`, `F-9`). The v3 pools'
+guard is proven by a dedicated regression suite; not relying on "it probably also protects
+against F-9" without a test for it.
 
 **Why Tier 2 is more than extra contracts.** The two v3 pools carry Tier 1's virtual-shares
 design (the first-depositor inflation defence), so the share-math surface spans both tiers. A
@@ -66,7 +79,8 @@ declare load-bearing:
 
 ## Evidence to date
 
-- **Tests:** 254 passing across 23 files (`npm ci && npm test`). Pool-v3 specifically has
+- **Tests:** 297 passing, 3 intentionally skipped, across 29 files (1 file skipped)
+  (`npm ci && npm test`). Pool-v3 specifically has
   29 tests in `tests/flashstack-pool-v3.test.ts` and `tests/pool-v3-hillary-review.test.ts`,
   including: an unlisted token rejected even when malicious, a non-repaying receiver
   reverting the whole transaction, an unapproved receiver rejected, the donation/inflation
@@ -89,6 +103,18 @@ declare load-bearing:
   `F-8` (Low, confirmed): `deposit` not gated by pause in the Tier 2 pools — **fixed in the
   undeployed v3 pools (PR #68); still open on the live, immutable v2 pools**, see below. Full
   register: [`FINDINGS_REGISTER.md`](FINDINGS_REGISTER.md).
+- **Track record since this packet's first pass (out of this audit's scope, included for
+  context):** `F-9` (above) and `F-10` — 13 receivers across both live cores approved with
+  no caller gate on their callback, letting a direct call bypass the whitelist entirely.
+  Mitigated in stages with real mainnet transactions (rescue, then de-approval), each
+  independently re-verified on chain after confirmation rather than trusting the broadcast
+  result, including two gaps a later re-sweep caught: a removal that had silently targeted a
+  non-existent address, and a third-party receiver's approval that needed de-listing
+  independent of whether its owner had rescued the balance. Full detail in
+  `FINDINGS_REGISTER.md`. A new process artifact came out of this work:
+  [`RECEIVER_VETTING.md`](RECEIVER_VETTING.md), a checklist every future
+  `add-approved-receiver` call must pass, signed off by both the Security & Contract Lead and
+  the maintainer before the call is made.
 - **Testnet staging:** the gate is defined in [`../TESTNET_STAGING.md`](../TESTNET_STAGING.md).
   `flashstack-stx-core-v2` (Tier 2) is staged. On it, the **negative case is proven on chain
   with a second key** (`accept-admin` from a non-pending principal rejected with
