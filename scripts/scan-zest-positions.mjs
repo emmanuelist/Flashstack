@@ -81,6 +81,11 @@ const LAZER_TOKEN     = process.env.LAZER_TOKEN;
 const NOVA_CROSSCHECK = parseInt(process.env.NOVA_CROSSCHECK ?? "3");
 export const BPS             = 10000n;
 export const DEBT_OFFSET     = 64n;
+// Required margin (in bps of LTV) above Zest's own LTV-LIQ-PARTIAL before
+// a candidate is safe to ACT on -- see safeToAct in evaluateAccount's
+// return value for why (DIA vs Lazer feed-45 price disagreement near the
+// threshold).
+export const LTV_SAFETY_MARGIN_BPS = 50n;
 
 // Asset registry -- confirmed live via v0-assets.status-multi(0..13), not
 // guessed. priceSource: which base feed resolve-price-feed routes to.
@@ -172,15 +177,27 @@ export async function readOnly(contract, fn, args, attempt = 0) {
     }
     throw new Error(`${contract}.${fn}: non-JSON response after retries: ${text.slice(0, 200)}`);
   }
-  if (!res.okay) throw new NoEntryError(`${contract}.${fn} failed: ${JSON.stringify(res)}`);
+  // res.okay === false covers more than "no entry" -- confirmed live by
+  // probing the contract directly: a genuine missing entry comes back
+  // {"okay":false,"cause":"UnwrapFailure"}, but a bad function name gives
+  // RuntimeCheck(UndefinedFunction), a wrong argument count gives
+  // RuntimeCheck(IncorrectArgumentCount), and a cost-limit error would too
+  // -- all the same {okay:false} shape. Only UnwrapFailure is the
+  // legitimate "no entry for this asset" case a caller may treat as 0;
+  // everything else is a real bug or transient failure and must propagate.
+  if (!res.okay) {
+    if (res.cause === "UnwrapFailure") throw new NoEntryError(`${contract}.${fn}: no entry (UnwrapFailure)`);
+    throw new Error(`${contract}.${fn} failed: ${JSON.stringify(res)}`);
+  }
   return cvToValue(hexToCV(res.result), true);
 }
 
-// Distinguishes a genuine Clarity-level "no entry" response (res.okay ===
-// false -- e.g. an account holding no position in a given asset) from a
-// network/parse failure that exhausted readOnly's own retries. Only the
-// former is safe for a caller to treat as "zero"; the latter must propagate
-// so it's counted as a failed evaluation, not silently priced as empty.
+// Distinguishes a genuine Clarity-level "no entry" response
+// (res.cause === "UnwrapFailure" -- e.g. an account holding no position
+// in a given asset) from every other readOnly() failure, network ones
+// included. Only the former is safe for a caller to treat as "zero"; the
+// latter must propagate so it's counted as a failed evaluation, not
+// silently priced as empty.
 class NoEntryError extends Error {}
 
 // cvToValue(cv, true)'s envelope behavior is genuinely inconsistent and
@@ -481,9 +498,19 @@ export async function evaluateAccount(id, account, mask, prices) {
 
   const egroup = await getEgroup(mask);
   const ltvLiqPartial = egroup?.ltvLiqPartial ?? null;
+  // Exact match of Zest's own liquidate() formula -- unchanged by the
+  // margin below, so this still answers "does Zest's own contract
+  // consider this account liquidatable," independent of our own pricing.
   const liquidatable = ltvLiqPartial !== null && currentLtv >= ltvLiqPartial;
+  // STX here is priced via DIA; Zest's on-chain liquidate() checks LTV
+  // against whatever Lazer feed 45 says at submission time. Near the
+  // threshold the two can disagree, so anything that ACTS on a candidate
+  // (the keeper) should require clearing the threshold by a margin, not
+  // just touching it -- otherwise it can arm a target Zest's own check
+  // then rejects with ERR-HEALTHY, burning gas for nothing.
+  const safeToAct = ltvLiqPartial !== null && currentLtv >= ltvLiqPartial + LTV_SAFETY_MARGIN_BPS;
 
-  return { id, account, mask, collateralUsd, debtUsd, currentLtv, ltvLiqPartial, liquidatable, debtDetail, collateralDetail };
+  return { id, account, mask, collateralUsd, debtUsd, currentLtv, ltvLiqPartial, liquidatable, safeToAct, debtDetail, collateralDetail };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────
@@ -534,7 +561,7 @@ async function main() {
     console.log(`\n  account:         ${c.account}`);
     console.log(`  collateral-usd:  $${(Number(c.collateralUsd) / 1e8).toFixed(2)}`);
     console.log(`  debt-usd:        $${(Number(c.debtUsd) / 1e8).toFixed(2)}`);
-    console.log(`  current-ltv:     ${(Number(c.currentLtv) / 100).toFixed(2)}%  (liq threshold: ${(Number(c.ltvLiqPartial) / 100).toFixed(2)}%)`);
+    console.log(`  current-ltv:     ${(Number(c.currentLtv) / 100).toFixed(2)}%  (liq threshold: ${(Number(c.ltvLiqPartial) / 100).toFixed(2)}%, safe-to-act margin: ${c.safeToAct ? "clear" : "within " + (Number(LTV_SAFETY_MARGIN_BPS) / 100).toFixed(2) + "% of threshold"})`);
     for (const d of c.debtDetail) console.log(`    debt: ${d.asset} -- $${(Number(d.usd) / 1e8).toFixed(2)}`);
   }
 
