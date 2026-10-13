@@ -1,14 +1,12 @@
 /**
- * De-approve seyi-flash-receiver-v1 (a third party's own contract, out of
- * FlashStack's control) from flashstack-stx-core.
+ * De-approve seyi-flash-receiver-v1 -- a third-party receiver, out of
+ * FlashStack's control -- from flashstack-stx-core.
  *
- * Still approved as of 2026-10-12 (confirmed by Hillary's F-10 re-sweep)
- * and holding 999,000 uSTX that anyone can take with a direct call --
- * live, reachable, exploitable right now. Rescuing those funds is Seyi's
- * own call (he's been notified separately); removing the approval from
- * stx-core is FlashStack's call as core admin, independent of whether he's
- * acted yet -- this script only does the latter. It does not touch his
- * contract or its balance in any way.
+ * Still approved as of 2026-10-12 (confirmed by Hillary's F-10 re-sweep).
+ * Its balance is the owner's own to manage; removing the approval from
+ * stx-core is FlashStack's call as core admin, independent of that --
+ * this script only does the latter. It does not touch the contract or
+ * its balance in any way.
  *
  * Same pattern as scripts/remove-vulnerable-stx-core-receivers.mjs (PR
  * #95): DRY-RUN BY DEFAULT, signer checked against the expected admin
@@ -82,7 +80,7 @@ async function main() {
 
   const preBalance = await getStxBalance(TARGET.address, TARGET.name);
   console.log(`  • remove-approved-receiver(${TARGET.address}.${TARGET.name})   (nonce ${nonce})`);
-  console.log(`    current balance: ${preBalance} µSTX ${preBalance > 0n ? "⚠ NONZERO — this is the live exposure, removal doesn't touch it, only the approval" : "(already rescued)"}`);
+  console.log(`    current balance: ${preBalance} µSTX ${preBalance > 0n ? "(owner's to manage -- removal doesn't touch it, only the approval)" : "(already rescued)"}`);
 
   if (!EXECUTE) {
     console.log();
