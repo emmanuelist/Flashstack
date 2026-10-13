@@ -51,7 +51,7 @@ All FlashStack contracts are under `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5`.
 | `stx-test-receiver` | Minimal working STX receiver |
 | `sbtc-test-receiver` | Minimal working sBTC receiver |
 | `bitflow-arb-receiver-v4` | Live STX/stSTX arb on Bitflow |
-| `velar-sbtc-arb-receiver` | Live sBTC/wSTX arb on Velar |
+| `velar-sbtc-arb-receiver` | **Non-functional, de-approved** — hardcodes Velar pool `u70`, which is not an sBTC/STX pool (see `docs/security/FINDINGS_REGISTER.md` F-10) |
 
 Canonical sBTC token: `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token`
 
@@ -179,7 +179,7 @@ Live example to read: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow
 
 Key difference from STX: repayment uses `contract-call?` with the sBTC token contract, not `stx-transfer?`.
 
-Live example: [contracts/velar-sbtc-arb-receiver.clar](../contracts/velar-sbtc-arb-receiver.clar).
+Reference for the sBTC repayment call only: [contracts/velar-sbtc-arb-receiver.clar](../contracts/velar-sbtc-arb-receiver.clar). Don't copy it as a strategy: its swap legs hardcode Velar pool `u70`, which is not an sBTC/STX pool, so they always revert, and it lacks the `contract-caller` guard F-10 requires. The verified sBTC/STX route is Bitflow `SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-sbtc-stx-v-1-1` via `xyk-core-v-1-2`.
 
 ---
 
