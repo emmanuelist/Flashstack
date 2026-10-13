@@ -259,6 +259,9 @@ async function getPossibleNextNonce(address) {
 async function setMinProfitFloors(pk, nonce, prices) {
   const stxPrice1e8  = prices[0]; // wstx, USD x 1e8 per whole STX
   const sbtcPrice1e8 = prices[2]; // sbtc-token, USD x 1e8 per whole sBTC
+  if (sbtcPrice1e8 === 0n || stxPrice1e8 === 0n) {
+    throw new Error(`setMinProfitFloors: zero price from resolveAllPrices (stx=${stxPrice1e8}, sbtc=${sbtcPrice1e8}) -- refusing to divide by it`);
+  }
   const feeUsdX1e8   = (MIN_PROFIT_MARGIN_USTX * stxPrice1e8) / 1_000_000n; // wstx: 6 decimals
   const minProfitSbtc = (feeUsdX1e8 * 100_000_000n) / sbtcPrice1e8;         // sbtc: 8 decimals
 
@@ -330,7 +333,19 @@ async function executeLiquidation(pk, signer, nonce, candidate, decision) {
     functionArgs: [Cl.bufferFromHex(evmHex)],
     senderKey: pk, network, postConditionMode: PostConditionMode.Deny, anchorMode: 1, nonce, fee: FEE_SET_FEED,
   });
-  console.log(`      ${EXPLORER}/0x${await broadcastOne(setFeedTx)}?chain=mainnet`);
+  try {
+    console.log(`      ${EXPLORER}/0x${await broadcastOne(setFeedTx)}?chain=mainnet`);
+  } catch (e) {
+    // set-target already landed at this point -- the receiver is armed
+    // with a target but no price feed behind it. Acceptable: the armed
+    // amount is bound to this exact loan size (see set-target's own
+    // comment), so a stranger firing flash-loan against it still just
+    // fails inside the receiver with no price feed set. But this pass
+    // aborts here, so say so rather than let the thrown error alone
+    // explain why the rest of toExecute never ran.
+    console.error(`  ABORT: set-price-feed failed after set-target landed (${e.message}). Receiver is armed for ${candidate.account} with no feed behind it -- safe (amount-bound, next flash-loan attempt just fails), but the rest of this pass's candidates are skipped.`);
+    throw e;
+  }
   nonce += 1;
 
   const loanAmount = decision.loanAmount;
@@ -355,7 +370,12 @@ async function executeLiquidation(pk, signer, nonce, candidate, decision) {
     txid = await broadcastOne(flashTx);
     console.log(`      Broadcast: ${EXPLORER}/0x${txid}?chain=mainnet`);
   } catch (e) {
+    // A rejected broadcast never consumed this nonce -- returning nonce+1
+    // anyway would leave a gap the next candidate's transactions sit
+    // behind forever, unconfirmed. Return the SAME nonce so the next
+    // candidate reuses it.
     console.error(`      FAILED: ${e.message}`);
+    return { txid: null, nonce };
   }
   return { txid, nonce: nonce + 1 };
 }
@@ -405,26 +425,14 @@ async function scan() {
     return 0;
   }
 
-  // Signer, owner check, and starting nonce are all done ONCE per pass,
-  // not per candidate -- re-deriving them per candidate was also what led
-  // to the per-candidate nonce re-read that collided across candidates.
-  let pk, signer, nonce;
-  if (EXECUTE) {
-    const wallet = await generateWallet({ secretKey: MNEMONIC, password: "" });
-    pk     = wallet.accounts[0].stxPrivateKey;
-    signer = getAddressFromPrivateKey(pk, "mainnet");
-
-    const owner = uw(await readOnly(RECEIVER, "get-owner", []));
-    if (owner !== signer) {
-      console.error(`  ABORT: KEEPER_MNEMONIC signs as ${signer}, but the receiver's owner is ${owner}. Refusing to arm anything with a key that isn't actually the owner.`);
-      return 0;
-    }
-
-    nonce = await getPossibleNextNonce(signer);
-    nonce = await setMinProfitFloors(pk, nonce, prices);
-  }
-
-  let actionable = 0;
+  // Decide first, execute second -- so setMinProfitFloors (a real,
+  // fee-paying broadcast) only runs when there's actually something
+  // actionable in this pass, not on every pass that merely found a
+  // liquidatable-looking candidate that then gets filtered out below. A
+  // persistent unsupported/unsafe candidate used to cost 2 wasted
+  // transactions every watch cycle forever -- the same pay-for-nothing
+  // pattern the feed-before-arm fix removed from executeLiquidation.
+  const toExecute = [];
   for (const candidate of candidates) {
     console.log(`\n--- ${candidate.account} ---`);
     console.log(`  collateral-usd: $${(Number(candidate.collateralUsd) / 1e8).toFixed(2)}  debt-usd: $${(Number(candidate.debtUsd) / 1e8).toFixed(2)}`);
@@ -437,27 +445,57 @@ async function scan() {
     if (!decision.unsupported && NEEDS_STX_FEED_MODES.has(decision.mode) && !FEED_45_AVAILABLE) {
       decision = { unsupported: true, reason: `mode ${decision.mode} needs Lazer feed 45, not available on the current Demo plan (see project memory; set FEED_45_AVAILABLE=true once upgraded)` };
     }
+    // safeToAct requires clearing LTV-LIQ-PARTIAL by a margin, not just
+    // touching it -- this scanner prices STX via DIA while Zest's
+    // on-chain check uses Lazer feed 45, and the two can disagree near
+    // the threshold. liquidatable alone (what got this candidate into
+    // the list) isn't enough to act on.
+    if (!decision.unsupported && !candidate.safeToAct) {
+      decision = { unsupported: true, reason: `within the DIA/Lazer safety margin of the liquidation threshold (current-ltv ${(Number(candidate.currentLtv) / 100).toFixed(2)}%, threshold ${(Number(candidate.ltvLiqPartial) / 100).toFixed(2)}%) -- not safe to act on yet` };
+    }
     if (decision.unsupported) {
       console.log(`  SKIP -- ${decision.reason}`);
       continue;
     }
     decision.loanAmount = sizeLoan(decision);
-    actionable++;
     // Grep-able marker, same convention as monitor-alex-arb.mjs /
     // monitor-bitflow-arb.mjs's "*** ARB OPPORTUNITY ***" -- a Monitor
     // watch on this script's output greps for this exact string.
     console.log(`  *** LIQUIDATION OPPORTUNITY *** ${candidate.account} -- mode ${decision.mode} (${decision.label})`);
     console.log(`  Target debt: ${decision.topDebt.actual} raw units of ${decision.topDebt.asset}`);
     console.log(`  Loan size:   ${decision.loanAmount} ${decision.core === "sbtc" ? "sat sBTC" : "microSTX"} (exact -- no-swap mode)`);
-
-    if (EXECUTE) {
-      const result = await executeLiquidation(pk, signer, nonce, candidate, decision);
-      nonce = result.nonce;
-    } else {
-      console.log(`  (dry-run -- set EXECUTE=true KEEPER_MNEMONIC="..." to trigger)`);
-    }
+    toExecute.push({ candidate, decision });
   }
-  return actionable;
+
+  if (toExecute.length === 0) return 0;
+
+  if (!EXECUTE) {
+    console.log(`\n  (dry-run -- set EXECUTE=true KEEPER_MNEMONIC="..." to trigger)`);
+    return toExecute.length;
+  }
+
+  // Signer, owner check, starting nonce, and the profit floors are all
+  // done ONCE per pass, not per candidate -- re-deriving them per
+  // candidate was also what led to the per-candidate nonce re-read that
+  // collided across candidates.
+  const wallet = await generateWallet({ secretKey: MNEMONIC, password: "" });
+  const pk     = wallet.accounts[0].stxPrivateKey;
+  const signer = getAddressFromPrivateKey(pk, "mainnet");
+
+  const owner = uw(await readOnly(RECEIVER, "get-owner", []));
+  if (owner !== signer) {
+    console.error(`  ABORT: KEEPER_MNEMONIC signs as ${signer}, but the receiver's owner is ${owner}. Refusing to arm anything with a key that isn't actually the owner.`);
+    return 0;
+  }
+
+  let nonce = await getPossibleNextNonce(signer);
+  nonce = await setMinProfitFloors(pk, nonce, prices);
+
+  for (const { candidate, decision } of toExecute) {
+    const result = await executeLiquidation(pk, signer, nonce, candidate, decision);
+    nonce = result.nonce;
+  }
+  return toExecute.length;
 }
 
 async function main() {
