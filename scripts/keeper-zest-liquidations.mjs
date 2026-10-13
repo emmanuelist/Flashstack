@@ -411,17 +411,24 @@ async function scan() {
       if (!maskHasDebt(mask)) continue;
       const account = entry.account.value;
       const result = await evaluateAccount(id, account, mask, prices);
-      if (result?.liquidatable) candidates.push(result);
+      // safeToAct, not liquidatable -- liquidatable alone means Zest's own
+      // formula calls this account liquidatable, but this keeper prices
+      // STX via DIA while Zest checks LTV against Lazer feed 45 on-chain,
+      // and the two can disagree near the threshold. safeToAct requires
+      // clearing LTV-LIQ-PARTIAL by a margin, not just touching it, so
+      // nothing this keeper ever arms is one that Zest's own check might
+      // reject as still-healthy.
+      if (result?.safeToAct) candidates.push(result);
     } catch (e) {
       failed++;
       console.error(`\n  WARN: account ${id} failed to evaluate, skipped: ${e.message}`);
     }
     if (id % 100n === 0n) process.stdout.write(`\r  ...${id}/${nr}`);
   }
-  console.log(`\r  done: ${candidates.length} liquidatable candidate(s) found, ${failed} failed`);
+  console.log(`\r  done: ${candidates.length} safe-to-act candidate(s) found, ${failed} failed`);
 
   if (candidates.length === 0) {
-    console.log("No liquidatable accounts right now.");
+    console.log("No safe-to-act liquidatable accounts right now.");
     return 0;
   }
 
@@ -444,14 +451,6 @@ async function scan() {
     // every cycle; see executeLiquidation's feed-before-arm fix too).
     if (!decision.unsupported && NEEDS_STX_FEED_MODES.has(decision.mode) && !FEED_45_AVAILABLE) {
       decision = { unsupported: true, reason: `mode ${decision.mode} needs Lazer feed 45, not available on the current Demo plan (see project memory; set FEED_45_AVAILABLE=true once upgraded)` };
-    }
-    // safeToAct requires clearing LTV-LIQ-PARTIAL by a margin, not just
-    // touching it -- this scanner prices STX via DIA while Zest's
-    // on-chain check uses Lazer feed 45, and the two can disagree near
-    // the threshold. liquidatable alone (what got this candidate into
-    // the list) isn't enough to act on.
-    if (!decision.unsupported && !candidate.safeToAct) {
-      decision = { unsupported: true, reason: `within the DIA/Lazer safety margin of the liquidation threshold (current-ltv ${(Number(candidate.currentLtv) / 100).toFixed(2)}%, threshold ${(Number(candidate.ltvLiqPartial) / 100).toFixed(2)}%) -- not safe to act on yet` };
     }
     if (decision.unsupported) {
       console.log(`  SKIP -- ${decision.reason}`);
