@@ -86,10 +86,16 @@ localization:
         passed as a literal contract-principal argument to add-asset/deposit/
         flash-loan/transfer, never embedded in source that gets localized.
   prerequisite: >-
-    contracts/test/sip-010-trait-ft-standard.clar must already be published
-    under this deployer (testnet-current-gen-plan.yaml step 1's generation, or
-    equivalent) before this plan's step 1, or flashstack-pool-v3's use-trait
-    resolves to nothing.
+    CORRECTED 2026-10-14, live, not just in prose: this plan's own step 1 now
+    publishes contracts/test/sip-010-trait-ft-standard.clar itself, rather
+    than assuming it. The original version of this note assumed
+    testnet-current-gen-plan.yaml's step 1 already covered it — wrong, that
+    step publishes stx-flash-receiver-trait, a different trait for the
+    single-asset line that never touches SIP-010. First real run against
+    this assumption aborted with (err none) on the receiver-trait publish
+    (an unresolvable use-trait), confirmed live via a 404 on
+    .sip-010-trait-ft-standard at the deployer. Fixed by adding the step,
+    not by assuming harder.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Asset listing
@@ -125,43 +131,63 @@ transactions:
 
   - step: 1
     type: contract-publish
-    contract-name: flashstack-v3-receiver-trait
-    path: contracts/flashstack-v3-receiver-trait.clar
+    contract-name: sip-010-trait-ft-standard
+    path: contracts/test/sip-010-trait-ft-standard.clar
     clarity-version: 3
     post-condition-mode: allow
     fee: 500000
     nonce-offset: 0
     why: >-
+      Added 2026-10-14, live, not assumed: every later contract's use-trait
+      resolves SP3FBR2AGK...sip-010-trait-ft-standard, which localize()
+      rewrites to <deployer>.sip-010-trait-ft-standard (OURS). This was
+      wrongly assumed already published here from the earlier stx-core-v2
+      run — that run published stx-flash-receiver-trait, a different trait,
+      never this one. First real run confirmed the gap: step 2's publish
+      (then "step 1") aborted with (err none), an unresolvable trait
+      reference, 404 confirmed live on .sip-010-trait-ft-standard at this
+      deployer before this step existed.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 2
+    type: contract-publish
+    contract-name: flashstack-v3-receiver-trait
+    path: contracts/flashstack-v3-receiver-trait.clar
+    clarity-version: 3
+    post-condition-mode: allow
+    fee: 500000
+    nonce-offset: 1
+    why: >-
       Generic receiver interface. Not yet deployed anywhere, mainnet or
       testnet — flashstack-pool-v3.clar's own header requires this first.
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 2
+  - step: 3
     type: contract-publish
     contract-name: flashstack-pool-v3
     path: contracts/flashstack-pool-v3.clar
     clarity-version: 6
     post-condition-mode: allow
     fee: 500000
-    nonce-offset: 1
+    nonce-offset: 2
     why: The generic multi-asset core this whole line exists to stage.
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 3
+  - step: 4
     type: contract-publish
     contract-name: pool-v3-test-receiver
     path: contracts/pool-v3-test-receiver.clar
     clarity-version: 3
     post-condition-mode: allow
     fee: 500000
-    nonce-offset: 2
+    nonce-offset: 3
     why: >-
       Minimal happy-path receiver. Its contract-call? target is the STATIC
       `.flashstack-pool-v3` (pool-v3-test-receiver.clar) — same
       static-reference constraint stx-test-receiver-v2.clar documents.
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 4
+  - step: 5
     type: contract-call
     contract: <deployer>.flashstack-pool-v3
     function: add-asset
@@ -170,21 +196,21 @@ transactions:
       - "uint 5"       # fee-bp
       - "uint 100000"  # max-loan, sats
     fee: 150000
-    nonce-offset: 3
+    nonce-offset: 4
     asserts:
       - is-listed(SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token) == true
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 5
+  - step: 6
     type: contract-call
     contract: <deployer>.flashstack-pool-v3
     function: add-approved-receiver
     args: [ "principal <deployer>.pool-v3-test-receiver" ]
     fee: 100000
-    nonce-offset: 4
+    nonce-offset: 5
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 6
+  - step: 7
     type: contract-call
     contract: <deployer>.flashstack-pool-v3
     function: deposit
@@ -192,14 +218,14 @@ transactions:
       - "principal SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token"
       - "uint 10000"   # sats
     fee: 150000
-    nonce-offset: 5
+    nonce-offset: 6
     why: >-
       pool-v3 has no separate admin-only reserve function the way the
       single-asset cores do (deposit-reserve) — deposit funds the per-asset
       reserve AND mints the depositor LP shares in one call.
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 7
+  - step: 8
     type: sip-010-transfer
     contract: SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token
     function: transfer
@@ -209,14 +235,14 @@ transactions:
       - "principal <deployer>.pool-v3-test-receiver"
       - "none"
     fee: 100000
-    nonce-offset: 6
+    nonce-offset: 7
     why: >-
       Fee buffer. A freshly deployed receiver holds 0 sBTC and cannot cover
       the fee on its own; without this the flash loan reverts before the
       pool's own invariant is even reached.
     evidence: { txid: null, block-height: null, status: null }
 
-  - step: 8
+  - step: 9
     type: contract-call
     contract: <deployer>.flashstack-pool-v3
     function: flash-loan
@@ -225,7 +251,7 @@ transactions:
       - "uint 2000"    # sats borrowed
       - "principal <deployer>.pool-v3-test-receiver"
     fee: 200000
-    nonce-offset: 7
+    nonce-offset: 8
     why: >-
       THE TESTNET EVIDENCE TXID. raw-fee = (2000 * 5) / 10000 = 1 sat exactly
       (pool-v3.clar's u0-floor to u1 is not reached at this size). Atomic
@@ -236,11 +262,11 @@ transactions:
 
 # ─────────────────────────────────────────────────────────────────────────────
 totals:
-  transactions: 8
-  fees-microstx: 2200000   # 3x500000 (deploys) + 150000 + 100000 + 150000 + 100000 (sbtc tx fee, paid in uSTX) + 200000
+  transactions: 9
+  fees-microstx: 2700000   # 4x500000 (deploys) + 150000 + 100000 + 150000 + 100000 (sbtc tx fee, paid in uSTX) + 200000
   sbtc-moved-sats: 10100   # 10000 deposit + 100 receiver seed
   required-sbtc-balance-sats: 10100
-  required-stx-balance-microstx: 2200000   # fees only — no STX principal moves in this plan
+  required-stx-balance-microstx: 2700000   # fees only — no STX principal moves in this plan
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Not covered by this plan

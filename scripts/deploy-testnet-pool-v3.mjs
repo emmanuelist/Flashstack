@@ -16,10 +16,12 @@
  * not any further unknown.
  *
  * Deploys in order:
- *   1. flashstack-v3-receiver-trait — generic receiver interface (fresh;
+ *   1. sip-010-trait-ft-standard    — local SIP-010 trait copy; every other
+ *                                     contract's use-trait resolves to this
+ *   2. flashstack-v3-receiver-trait — generic receiver interface (fresh;
  *      not yet deployed anywhere, mainnet or testnet)
- *   2. flashstack-pool-v3           — the generic multi-asset core
- *   3. pool-v3-test-receiver        — minimal happy-path receiver, computes
+ *   3. flashstack-pool-v3           — the generic multi-asset core
+ *   4. pool-v3-test-receiver        — minimal happy-path receiver, computes
  *                                     its own repayment from the pool's
  *                                     live fee-bp rather than assuming it
  *   Then: list sBTC as an asset -> whitelist the receiver -> deposit a
@@ -268,8 +270,8 @@ async function main() {
   const stxBalance = await getStxBalance(DEPLOYER);
   console.log(`  STX balance:  ${(Number(stxBalance) / 1_000_000).toFixed(2)} STX`);
   if (stxBalance < 2_000_000_000n) {
-    console.warn("  WARNING: below 2000 STX. Three contract deploys plus five calls need");
-    console.warn("  2.2 STX in fees total (deployments/testnet-pool-v3-plan.yaml totals:) --");
+    console.warn("  WARNING: below 2000 STX. Four contract deploys plus five calls need");
+    console.warn("  2.7 STX in fees total (deployments/testnet-pool-v3-plan.yaml totals:) --");
     console.warn("  this preflight threshold is conservative, not the exact cost.");
     console.warn(`  Fund at: https://explorer.hiro.so/sandbox/faucet?chain=testnet`);
     if (stxBalance < 200_000_000n) {
@@ -304,8 +306,31 @@ async function main() {
 
   const results = {};
 
-  // ── Step 1: flashstack-v3-receiver-trait ─────────────────────────────────
-  console.log("Step 1 — Deploy flashstack-v3-receiver-trait");
+  // ── Step 1: sip-010-trait-ft-standard ─────────────────────────────────────
+  // Caught live, not anticipated: flashstack-v3-receiver-trait.clar's
+  // use-trait resolves SP3FBR2AGK...sip-010-trait-ft-standard, which
+  // localize() rewrites to <deployer>.sip-010-trait-ft-standard (it's in
+  // OURS -- FlashStack publishes its own copy first). This assumed that copy
+  // already existed under this deployer from the earlier stx-core-v2 run --
+  // wrong: that run published stx-flash-receiver-trait, a different trait
+  // for the single-asset line, which never touches SIP-010. Nothing had ever
+  // published this one here. First attempt at step 2 (then "step 1") aborted
+  // with (err none) -- an unresolvable trait reference -- confirmed live via
+  // a 404 on .sip-010-trait-ft-standard at this deployer, fixed by adding
+  // this step rather than assumed away a second time.
+  console.log("Step 1 — Deploy sip-010-trait-ft-standard");
+  console.log("  (Local copy of the SIP-010 trait -- every later contract's use-trait needs it)");
+  results.sip010Trait = await deployContract(
+    privateKey, nonce++,
+    "sip-010-trait-ft-standard",
+    "contracts/test/sip-010-trait-ft-standard.clar",
+    DEPLOYER,
+  );
+  await waitForConfirm(results.sip010Trait, "deploy sip-010-trait-ft-standard");
+  console.log();
+
+  // ── Step 2: flashstack-v3-receiver-trait ─────────────────────────────────
+  console.log("Step 2 — Deploy flashstack-v3-receiver-trait");
   console.log("  (Generic receiver interface -- not yet deployed anywhere, mainnet or testnet)");
   results.trait = await deployContract(
     privateKey, nonce++,
@@ -316,8 +341,8 @@ async function main() {
   await waitForConfirm(results.trait, "deploy flashstack-v3-receiver-trait");
   console.log();
 
-  // ── Step 2: flashstack-pool-v3 ────────────────────────────────────────────
-  console.log("Step 2 — Deploy flashstack-pool-v3");
+  // ── Step 3: flashstack-pool-v3 ────────────────────────────────────────────
+  console.log("Step 3 — Deploy flashstack-pool-v3");
   console.log("  (Generic multi-asset flash-loan + LP pool, Clarity 6 / epoch 4.0)");
   results.pool = await deployContract(
     privateKey, nonce++,
@@ -328,8 +353,8 @@ async function main() {
   await waitForConfirm(results.pool, "deploy flashstack-pool-v3");
   console.log();
 
-  // ── Step 3: pool-v3-test-receiver ─────────────────────────────────────────
-  console.log("Step 3 — Deploy pool-v3-test-receiver");
+  // ── Step 4: pool-v3-test-receiver ─────────────────────────────────────────
+  console.log("Step 4 — Deploy pool-v3-test-receiver");
   console.log("  (Minimal happy-path receiver: repays principal + fee, fee read live)");
   results.receiver = await deployContract(
     privateKey, nonce++,
@@ -340,8 +365,8 @@ async function main() {
   await waitForConfirm(results.receiver, "deploy pool-v3-test-receiver");
   console.log();
 
-  // ── Step 4: List sBTC as an asset ─────────────────────────────────────────
-  console.log(`Step 4 — add-asset: list ${SBTC_TESTNET_ADDRESS}.${SBTC_TESTNET_NAME}`);
+  // ── Step 5: List sBTC as an asset ─────────────────────────────────────────
+  console.log(`Step 5 — add-asset: list ${SBTC_TESTNET_ADDRESS}.${SBTC_TESTNET_NAME}`);
   console.log(`  (fee-bp ${FEE_BP} = ${(FEE_BP / 100).toFixed(2)}%, max-loan ${MAX_LOAN} sats)`);
   results.addAsset = await callContract(
     privateKey, nonce++,
@@ -360,8 +385,8 @@ async function main() {
   assertEqual("asset listed after add-asset", listed, "true");
   console.log();
 
-  // ── Step 5: Whitelist the receiver ────────────────────────────────────────
-  console.log("Step 5 — Whitelist pool-v3-test-receiver in flashstack-pool-v3");
+  // ── Step 6: Whitelist the receiver ────────────────────────────────────────
+  console.log("Step 6 — Whitelist pool-v3-test-receiver in flashstack-pool-v3");
   results.whitelist = await callContract(
     privateKey, nonce++,
     DEPLOYER, "flashstack-pool-v3", "add-approved-receiver",
@@ -370,8 +395,8 @@ async function main() {
   await waitForConfirm(results.whitelist, "add-approved-receiver");
   console.log();
 
-  // ── Step 6: Deposit (funds the reserve AND mints the deployer LP shares) ──
-  console.log(`Step 6 — Deposit ${DEPOSIT_AMOUNT} sats of sBTC`);
+  // ── Step 7: Deposit (funds the reserve AND mints the deployer LP shares) ──
+  console.log(`Step 7 — Deposit ${DEPOSIT_AMOUNT} sats of sBTC`);
   console.log("  (pool-v3 has no separate admin-only reserve function -- deposit funds");
   console.log("   the per-asset reserve and mints the depositor LP shares in one call)");
   results.deposit = await callContract(
@@ -386,8 +411,8 @@ async function main() {
   await waitForConfirm(results.deposit, "deposit");
   console.log();
 
-  // ── Step 7: Seed the receiver's fee buffer ────────────────────────────────
-  console.log(`Step 7 — Seed pool-v3-test-receiver with ${RECEIVER_SEED_AMOUNT} sats of sBTC`);
+  // ── Step 8: Seed the receiver's fee buffer ────────────────────────────────
+  console.log(`Step 8 — Seed pool-v3-test-receiver with ${RECEIVER_SEED_AMOUNT} sats of sBTC`);
   console.log("  (receiver repays principal + fee from its own balance; without this a");
   console.log("   fresh receiver has 0 sBTC and the flash loan fails before the pool's");
   console.log("   own invariant is even reached)");
@@ -405,8 +430,8 @@ async function main() {
   await waitForConfirm(results.seed, "seed pool-v3-test-receiver");
   console.log();
 
-  // ── Step 8: Execute test flash loan ───────────────────────────────────────
-  console.log(`Step 8 — Execute flash loan: borrow ${LOAN_AMOUNT} sats of sBTC via pool-v3-test-receiver`);
+  // ── Step 9: Execute test flash loan ───────────────────────────────────────
+  console.log(`Step 9 — Execute flash loan: borrow ${LOAN_AMOUNT} sats of sBTC via pool-v3-test-receiver`);
   console.log("  (This is the testnet evidence txid -- atomic borrow + repay in one tx)");
   const reserveBefore = await callReadOnly(DEPLOYER, DEPLOYER, "flashstack-pool-v3", "get-reserve",
     [Cl.contractPrincipal(SBTC_TESTNET_ADDRESS, SBTC_TESTNET_NAME)]);
@@ -434,6 +459,7 @@ async function main() {
   console.log(`║  Deployer: ${DEPLOYER.padEnd(42)} ║`);
   console.log("╠══════════════════════════════════════════════════════╣");
   console.log("║  Contracts:                                          ║");
+  console.log(`  sip-010-trait-ft-standard:    ${EXPLORER}/${results.sip010Trait}?chain=testnet`);
   console.log(`  flashstack-v3-receiver-trait: ${EXPLORER}/${results.trait}?chain=testnet`);
   console.log(`  flashstack-pool-v3:           ${EXPLORER}/${results.pool}?chain=testnet`);
   console.log(`  pool-v3-test-receiver:        ${EXPLORER}/${results.receiver}?chain=testnet`);
