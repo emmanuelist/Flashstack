@@ -52,6 +52,7 @@ const KNOWN_TEST_PATHS = [
   "contracts/test/flashstack-v3-receiver-trait.clar",
   "contracts/test/malicious-token.clar",
   "contracts/test/mock-usdcx.clar",
+  "contracts/test/pool-v3-test-receiver.clar",
   "contracts/test/sip-010-trait-ft-standard.clar",
   "contracts/test/test-pool-receiver-good.clar",
   "contracts/test/test-pool-v2-receiver-deposit-reentrant.clar",

@@ -13,14 +13,18 @@
 
 (define-constant ERR-ASSET-LOOKUP-FAILED (err u901))
 (define-constant ERR-REPAY               (err u902))
+(define-constant ERR-NOT-CORE             (err u903))
 
 (define-public (execute-flash (token <sip-010-trait>) (amount uint) (core principal))
-  (let (
-    (cfg     (unwrap! (contract-call? .flashstack-pool-v3 get-asset (contract-of token)) ERR-ASSET-LOOKUP-FAILED))
-    (raw-fee (/ (* amount (get fee-bp cfg)) u10000))
-    (fee     (if (> raw-fee u0) raw-fee u1))
-  )
-    (unwrap! (as-contract (contract-call? token transfer (+ amount fee) tx-sender core none)) ERR-REPAY)
-    (ok true)
+  (begin
+    (asserts! (is-eq contract-caller .flashstack-pool-v3) ERR-NOT-CORE)
+    (let (
+      (cfg     (unwrap! (contract-call? .flashstack-pool-v3 get-asset (contract-of token)) ERR-ASSET-LOOKUP-FAILED))
+      (raw-fee (/ (* amount (get fee-bp cfg)) u10000))
+      (fee     (if (> raw-fee u0) raw-fee u1))
+    )
+      (unwrap! (as-contract (contract-call? token transfer (+ amount fee) tx-sender .flashstack-pool-v3 none)) ERR-REPAY)
+      (ok true)
+    )
   )
 )

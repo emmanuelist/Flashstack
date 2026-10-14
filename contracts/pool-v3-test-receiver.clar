@@ -24,20 +24,34 @@
 ;; copy first on testnet), so deploy-testnet-pool-v3.mjs rewrites it to the
 ;; testnet deployer automatically, the same mechanism every other contract in
 ;; this generation already relies on.
+;;
+;; SECURITY (flagged in review): the first version of this file had the F-10
+;; shape -- no contract-caller gate, repaid to the caller-supplied `core`
+;; argument instead of a hardcoded target -- so anyone could call
+;; execute-flash directly and redirect this contract's balance anywhere.
+;; TESTNET ONLY -- holds only a small test buffer and is never meant to be
+;; approved on mainnet -- but gated for real anyway rather than left to a
+;; comment, same discipline as every other receiver in this project.
 
 (impl-trait .flashstack-v3-receiver-trait.flashstack-v3-receiver-trait)
 (use-trait sip-010-trait 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
 
 (define-constant ERR-ASSET-LOOKUP-FAILED (err u901))
 (define-constant ERR-REPAY               (err u902))
+(define-constant ERR-NOT-CORE             (err u903))
 
 (define-public (execute-flash (token <sip-010-trait>) (amount uint) (core principal))
-  (let (
-    (cfg     (unwrap! (contract-call? .flashstack-pool-v3 get-asset (contract-of token)) ERR-ASSET-LOOKUP-FAILED))
-    (raw-fee (/ (* amount (get fee-bp cfg)) u10000))
-    (fee     (if (> raw-fee u0) raw-fee u1))
-  )
-    (unwrap! (as-contract (contract-call? token transfer (+ amount fee) tx-sender core none)) ERR-REPAY)
-    (ok true)
+  (begin
+    (asserts! (is-eq contract-caller .flashstack-pool-v3) ERR-NOT-CORE)
+    (let (
+      (cfg     (unwrap! (contract-call? .flashstack-pool-v3 get-asset (contract-of token)) ERR-ASSET-LOOKUP-FAILED))
+      (raw-fee (/ (* amount (get fee-bp cfg)) u10000))
+      (fee     (if (> raw-fee u0) raw-fee u1))
+    )
+      ;; Repay to the hardcoded pool, not the caller-supplied `core` -- the
+      ;; trait requires the parameter, but trusting it is exactly the F-10 gap.
+      (unwrap! (as-contract (contract-call? token transfer (+ amount fee) tx-sender .flashstack-pool-v3 none)) ERR-REPAY)
+      (ok true)
+    )
   )
 )
