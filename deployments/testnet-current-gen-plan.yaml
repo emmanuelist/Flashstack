@@ -265,8 +265,11 @@ totals:
 # ─────────────────────────────────────────────────────────────────────────────
 # Deliberately narrow, matching deploy-testnet.mjs:25-34:
 #   - flashstack-stx-pool-v3        (needs its own receiver, same static-target constraint)
-#   - flashstack-pool-v3 + flashstack-sbtc-core-v2 (multi-asset line, add-asset
-#     calibration, own receiver — stageable per #55 but a materially bigger deploy)
+#   - flashstack-pool-v3 (the multi-asset/sBTC-listed half) — now its own plan,
+#     deployments/testnet-pool-v3-plan.yaml, derived from
+#     scripts/deploy-testnet-pool-v3.mjs. Not yet executed.
+#   - flashstack-sbtc-core-v2 (the separate single-asset sBTC core) — still not
+#     covered by any plan.
 # Also not covered, and still open on the §6 checklist for this line:
 #   - non-repaying receiver reverts — no such contract exists for core-v2; one
 #     would have to be written and published.

@@ -1,0 +1,253 @@
+# FlashStack — pool-v3 (generic multi-asset) testnet staging plan
+#
+# THIS IS NOT A CLARINET DEPLOYMENT PLAN. Do not run it with
+# `clarinet deployments apply`. Same reasoning as testnet-current-gen-plan.yaml
+# beside it: clarinet-generated plans publish source verbatim, which on testnet
+# would broadcast contracts still carrying mainnet principals and abort at
+# publish time (docs/TESTNET_STAGING.md section 5.1).
+#
+# This file is the written form of what scripts/deploy-testnet-pool-v3.mjs
+# executes: the contract set, the order, the fees, the nonce discipline and the
+# arguments. Every number below is READ OFF THAT SCRIPT — none is estimated,
+# and none has been invented in prose (docs/TESTNET_STAGING.md section 7).
+# Source line references are given per field so a reviewer can diff the file
+# against the script rather than trust it.
+#
+# The `evidence:` blocks are empty on purpose. They are filled in from a run,
+# and every value must be independently re-verified against the live testnet
+# API — not copied from the script's console output (docs/TESTNET_STAGING.md
+# section 6a).
+#
+# Follow-up to testnet-current-gen-plan.yaml, which deliberately did not cover
+# this line — see that file's "Not covered by this plan" footer and
+# docs/TESTNET_STAGING.md section 8 action 7/8.
+
+schema: flashstack-testnet-staging-plan/v1
+generated: 2026-10-14
+derived-from: scripts/deploy-testnet-pool-v3.mjs
+executed-by: node scripts/deploy-testnet-pool-v3.mjs   # requires TESTNET_MNEMONIC, operator only
+network: testnet
+stacks-node: https://api.testnet.hiro.so
+explorer: https://explorer.hiro.so/txid
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployer
+# ─────────────────────────────────────────────────────────────────────────────
+# Derived at runtime from TESTNET_MNEMONIC (deploy-testnet-pool-v3.mjs). Reuses
+# the SAME testnet identity as testnet-current-gen-plan.yaml — one funded
+# testnet wallet to track, not two. Not committed; the address is recorded here
+# only once a run fills it in.
+deployer:
+  address: <TO BE FILLED FROM A RUN>
+  source: derived from TESTNET_MNEMONIC at runtime
+  preflight:
+    # deploy-testnet-pool-v3.mjs's own balance checks
+    stx-warn-below-microstx: 2000000000    # prints a warning, continues
+    stx-hard-stop-below-microstx: 200000000
+    sbtc-hard-stop-below-sats: 10100        # DEPOSIT_AMOUNT + RECEIVER_SEED_AMOUNT
+    sbtc-source: >-
+      Testnet sBTC does not come from a faucet and this key cannot mint it. It
+      must arrive as a SIP-010 transfer from ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+      (the byte-identical sBTC deployment, confirmed holding 8000000000 sats /
+      80 sBTC live on 2026-10-14), an operator-performed manual step — the
+      script checks the resulting balance, it does not sign as that address.
+      Same boundary deploy-testnet.mjs's proveBC1 draws around "OTHER", a
+      principal the signing key does not control.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Source localization — applied to every published contract before broadcast
+# ─────────────────────────────────────────────────────────────────────────────
+localization:
+  module: scripts/lib/testnet-localize.mjs
+  rule: >-
+    Every OURS principal is rewritten to the testnet deployer; every
+    TESTNET_EQUIVALENT principal to its verified testnet counterpart; any
+    surviving mainnet principal aborts the run before broadcast
+    (assertFullyLocalized).
+  affects-this-plan:
+    - SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE: >-
+        SIP-010 standard trait, referenced by flashstack-pool-v3.clar (use-trait)
+        and pool-v3-test-receiver.clar (use-trait). In scripts/lib/testnet-localize.mjs's
+        OURS table — FlashStack publishes its own copy first on testnet
+        (contracts/test/sip-010-trait-ft-standard.clar via
+        testnet-current-gen-plan.yaml's prerequisite run), so this rewrites to
+        the deployer, not to a third party.
+    - ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM: >-
+        NOT rewritten — this is the TESTNET_EQUIVALENT target itself (sBTC),
+        passed as a literal contract-principal argument to add-asset/deposit/
+        flash-loan/transfer, never embedded in source that gets localized.
+  prerequisite: >-
+    contracts/test/sip-010-trait-ft-standard.clar must already be published
+    under this deployer (testnet-current-gen-plan.yaml step 1's generation, or
+    equivalent) before this plan's step 1, or flashstack-pool-v3's use-trait
+    resolves to nothing.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Asset listing
+# ─────────────────────────────────────────────────────────────────────────────
+asset:
+  token: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token
+  what: >-
+    Verified byte-identical to mainnet's canonical sBTC (SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4),
+    docs/TESTNET_STAGING.md section 5.2. NOT a mock — add-asset's live
+    get-decimals()/get-balance() calls run against the real dependency.
+    get-decimals confirmed live 2026-10-14: (ok u8), matching mainnet.
+  fee-bp: 5          # deploy-testnet-pool-v3.mjs FEE_BP — matches the single-asset
+                      # cores' 0.05% convention, well under pool-v3's MAX-FEE-BP (u100)
+  max-loan: 100000   # sats (0.001 sBTC) — conservative testnet ceiling
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Nonce discipline
+# ─────────────────────────────────────────────────────────────────────────────
+nonces:
+  start: fetched from /v2/accounts/<deployer>?proof=0 at run time
+  allocation: strictly sequential, +1 per transaction, one signer, no gaps
+  batching: >-
+    None. Every transaction waits for confirmation before the next is built
+    (waitForConfirm — 8s poll, 80 attempts, ~10min ceiling per tx). There are
+    no parallel batches; a failure stops the run.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Transactions, in execution order
+# ─────────────────────────────────────────────────────────────────────────────
+# fee is in microSTX (contract deploys/calls) or sats (the one sBTC transfer,
+# noted explicitly) and is fixed by the script — not estimated per-tx.
+transactions:
+
+  - step: 1
+    type: contract-publish
+    contract-name: flashstack-v3-receiver-trait
+    path: contracts/flashstack-v3-receiver-trait.clar
+    clarity-version: 3
+    post-condition-mode: allow
+    fee: 500000
+    nonce-offset: 0
+    why: >-
+      Generic receiver interface. Not yet deployed anywhere, mainnet or
+      testnet — flashstack-pool-v3.clar's own header requires this first.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 2
+    type: contract-publish
+    contract-name: flashstack-pool-v3
+    path: contracts/flashstack-pool-v3.clar
+    clarity-version: 6
+    post-condition-mode: allow
+    fee: 500000
+    nonce-offset: 1
+    why: The generic multi-asset core this whole line exists to stage.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 3
+    type: contract-publish
+    contract-name: pool-v3-test-receiver
+    path: contracts/pool-v3-test-receiver.clar
+    clarity-version: 3
+    post-condition-mode: allow
+    fee: 500000
+    nonce-offset: 2
+    why: >-
+      Minimal happy-path receiver. Its contract-call? target is the STATIC
+      `.flashstack-pool-v3` (pool-v3-test-receiver.clar) — same
+      static-reference constraint stx-test-receiver-v2.clar documents.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 4
+    type: contract-call
+    contract: <deployer>.flashstack-pool-v3
+    function: add-asset
+    args:
+      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "uint 5"       # fee-bp
+      - "uint 100000"  # max-loan, sats
+    fee: 150000
+    nonce-offset: 3
+    asserts:
+      - is-listed(ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token) == true
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 5
+    type: contract-call
+    contract: <deployer>.flashstack-pool-v3
+    function: add-approved-receiver
+    args: [ "principal <deployer>.pool-v3-test-receiver" ]
+    fee: 100000
+    nonce-offset: 4
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 6
+    type: contract-call
+    contract: <deployer>.flashstack-pool-v3
+    function: deposit
+    args:
+      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "uint 10000"   # sats
+    fee: 150000
+    nonce-offset: 5
+    why: >-
+      pool-v3 has no separate admin-only reserve function the way the
+      single-asset cores do (deposit-reserve) — deposit funds the per-asset
+      reserve AND mints the depositor LP shares in one call.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 7
+    type: sip-010-transfer
+    contract: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token
+    function: transfer
+    args:
+      - "uint 100"     # sats
+      - "principal <deployer>"
+      - "principal <deployer>.pool-v3-test-receiver"
+      - "none"
+    fee: 100000
+    nonce-offset: 6
+    why: >-
+      Fee buffer. A freshly deployed receiver holds 0 sBTC and cannot cover
+      the fee on its own; without this the flash loan reverts before the
+      pool's own invariant is even reached.
+    evidence: { txid: null, block-height: null, status: null }
+
+  - step: 8
+    type: contract-call
+    contract: <deployer>.flashstack-pool-v3
+    function: flash-loan
+    args:
+      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "uint 2000"    # sats borrowed
+      - "principal <deployer>.pool-v3-test-receiver"
+    fee: 200000
+    nonce-offset: 7
+    why: >-
+      THE TESTNET EVIDENCE TXID. raw-fee = (2000 * 5) / 10000 = 1 sat exactly
+      (pool-v3.clar's u0-floor to u1 is not reached at this size). Atomic
+      borrow + repay in one transaction.
+    asserts:
+      - get-reserve(sbtc-token) after >= get-reserve(sbtc-token) before + 1
+    evidence: { txid: null, block-height: null, status: null }
+
+# ─────────────────────────────────────────────────────────────────────────────
+totals:
+  transactions: 8
+  fees-microstx: 2200000   # 3x500000 (deploys) + 150000 + 100000 + 150000 + 100000 (sbtc tx fee, paid in uSTX) + 200000
+  sbtc-moved-sats: 10100   # 10000 deposit + 100 receiver seed
+  required-sbtc-balance-sats: 10100
+  required-stx-balance-microstx: 2200000   # fees only — no STX principal moves in this plan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Not covered by this plan
+# ─────────────────────────────────────────────────────────────────────────────
+# Deliberately narrow, matching deploy-testnet-pool-v3.mjs's own header:
+#   - flashstack-stx-pool-v3   (needs its own receiver, same static-target
+#     constraint as every other receiver in this generation)
+#   - flashstack-sbtc-core-v2  (separate single-asset line, own receiver)
+# Also not covered, and still open on the section-6 checklist for this line:
+#   - non-repaying / under-paying receiver reverts — no such receiver exists
+#     for pool-v3 yet (stx-underpay-receiver-v2 / PR #110 is the precedent
+#     for stx-core-v2 only, not this contract).
+#   - unapproved receiver is rejected — needs no new contract, but no step
+#     here performs it.
+#   - multi-asset behavior (a second listed asset, cross-asset flows) — this
+#     plan lists exactly one asset (sBTC). Proving the per-asset reentrancy
+#     lock design doc section 13 describes (a receiver legitimately
+#     flash-loaning a DIFFERENT asset mid-callback) needs a second listing,
+#     deliberately not folded in here.

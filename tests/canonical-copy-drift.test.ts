@@ -57,7 +57,7 @@ describe("localized simnet copies must not drift from their canonical source", (
     // Guards against the pair set silently shrinking — a copy being deleted, or a
     // canonical source being renamed, would otherwise just reduce the loop below
     // to nothing and pass. Bump this deliberately when a pair is added or removed.
-    expect(PAIRS.length, `pairs found: ${PAIRS.join(", ")}`).toBe(14);
+    expect(PAIRS.length, `pairs found: ${PAIRS.join(", ")}`).toBe(15);
   });
 
   for (const file of PAIRS) {

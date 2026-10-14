@@ -539,8 +539,13 @@ would broadcast contracts still carrying mainnet principals (§5.1).
 | 6 | ~~Write `deployments/testnet-current-gen-plan.yaml`~~ | **DONE 2026-09-21** — written from `deploy-testnet.mjs`, `evidence:` slots empty pending a run |
 | 7 | Execute the stage and record evidence | A funded testnet deployer — **operator only** |
 | 8 | Re-run §6a against the corrected Step 8 (`a92fb8e`) | **Route A chosen**; `--steps=admin` in PR #66. Then a funded key — operator only |
+| 9 | ~~Write a receiver + deploy script + plan for `flashstack-pool-v3`~~ | **DONE 2026-10-14** — `contracts/pool-v3-test-receiver.clar` (+ localized copy, D6 shape — its `execute-flash` takes `<sip-010-trait>` as a parameter, which needs the same canonical/contracts-test pairing `flashstack-pool-v3` itself uses), `scripts/deploy-testnet-pool-v3.mjs`, `deployments/testnet-pool-v3-plan.yaml`. `clarinet check` and the full suite both pass with the new files. Not yet run — needs action 7's operator steps, same as the rest of this line |
 
-**All three original blockers are now closed.** The entire current generation — the
-STX line, `flashstack-pool-v3`, *and* the sBTC line — can be staged faithfully. What
-remains is mechanical work plus one practical unknown (obtaining testnet sBTC), none
-of which needs an owner decision.
+**All three original blockers are now closed, and the pool-v3 line's own mechanical
+work (action 9) is done.** What remains for `flashstack-pool-v3` specifically is
+purely operational: a funded testnet wallet (shared with the STX line, see §3) plus
+testnet sBTC obtained via manual transfer from the known byte-identical holder
+(`ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM`, confirmed live 2026-10-14 holding
+8,000,000,000 sats), then running
+`TESTNET_MNEMONIC="..." node scripts/deploy-testnet-pool-v3.mjs`. None of this needs
+an owner decision — it's execution, not a question.

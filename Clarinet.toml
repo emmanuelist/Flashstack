@@ -418,6 +418,20 @@ path = "contracts/test/flashstack-pool-v3.clar"
 clarity_version = 6
 epoch = "4.0"
 
+# Testnet-destined receiver for pool-v3 (docs/TESTNET_STAGING.md section 8
+# action 7/8). Same D6 shape as flashstack-pool-v3/flashstack-v3-receiver-trait
+# above -- clarinet always compiles the contracts/test/ localized copy, not
+# the canonical mainnet-principal-referencing source; see
+# tests/canonical-copy-drift.test.ts. Required here specifically because
+# execute-flash takes <sip-010-trait> as a parameter: clarinet check needs
+# this file, flashstack-v3-receiver-trait and flashstack-pool-v3 all
+# resolving sip-010-trait to the SAME concrete trait, which stx-test-receiver-v2
+# never had to deal with (its trait has no nested trait-typed parameter).
+[contracts.pool-v3-test-receiver]
+path = "contracts/test/pool-v3-test-receiver.clar"
+clarity_version = 3
+epoch = "latest"
+
 [contracts.test-pool-v3-receiver-good]
 path = "contracts/test/test-pool-v3-receiver-good.clar"
 clarity_version = 3
