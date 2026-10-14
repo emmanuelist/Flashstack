@@ -50,22 +50,32 @@ export const OURS = {
 export const TESTNET_EQUIVALENT = {
   // sBTC. All five contracts of the set verified byte-identical to
   // SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4 by SHA-256 over
-  // /v2/contracts/source on both chains, 2026-09-17:
+  // /v2/contracts/source on both chains:
   //   sbtc-token 4,759B (sha256 8f0a0edd…), sbtc-registry 11,209B,
   //   sbtc-deposit 4,151B, sbtc-withdrawal 12,264B, sbtc-bootstrap-signers 5,801B.
   // sbtc-token's only internal dependency is .sbtc-registry, present and identical.
   // Live get-decimals() returns (ok u8), matching mainnet — so pool-v3's
   // share-scale calibration (pv3-F2) is exercised against the real value.
   //
-  // CAVEAT, and it must survive into the staging evidence: ST1PQHQ… is the
-  // well-known Clarinet default deployer and its key is public. The CODE is
-  // provably canonical; the DEPLOYMENT is not authoritative. Acceptable on testnet
-  // — nothing is at stake and this tests integration mechanics, not custody — but
-  // results must read "byte-identical sBTC deployment at the public Clarinet
-  // deployer address", never "canonical sBTC". See docs/TESTNET_STAGING.md §5.2.
+  // CORRECTED 2026-10-14: switched from ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+  // to SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1 — a SECOND, independently
+  // discovered byte-identical deployment (same five-file comparison re-run
+  // against it, same hashes). Preferred now for two concrete reasons, not
+  // guessed: (1) it carries the full protocol-mint / protocol-burn /
+  // protocol-lock interface a real Bitcoin-bridge-integrated deployment
+  // needs, which a standalone test copy has no particular reason to include;
+  // (2) it's where testnet sBTC obtained through ordinary means (a wallet's
+  // own testnet sBTC flow) actually lands — confirmed live, a real transfer
+  // landed 20,000 sats on it, not on ST1PQHQ…'s copy. ST1PQHQ…'s deployment
+  // is untouched and still holds its balance; it just stopped being the
+  // more useful of two valid choices. Same caveat as before, updated:
+  // results must read "byte-identical sBTC deployment at
+  // SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1", never "canonical sBTC" --
+  // this is still a testnet deployment whose operator this project does not
+  // control, not an assertion about who runs it. See docs/TESTNET_STAGING.md §5.2.
   SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4: {
-    testnet: "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM",
-    what: "sBTC contract set (byte-identical; non-authoritative deployer)",
+    testnet: "SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1",
+    what: "sBTC contract set (byte-identical; bridge-interface deployment)",
   },
 };
 

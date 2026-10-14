@@ -28,7 +28,7 @@
  *   funded) -> seed the receiver's fee buffer -> execute a real flash loan.
  *
  * The listed asset is the testnet sBTC equivalent
- * (ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token, verified
+ * (SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token, verified
  * byte-identical to mainnet's SM3VDXK3…, docs/TESTNET_STAGING.md section
  * 5.2) -- NOT a mock, so pool-v3's real get-decimals()/get-balance() calls
  * and share-scale calibration (pv3-F2) run against the genuine dependency.
@@ -47,12 +47,14 @@
  *      to track.
  *   2. Fund it with testnet STX: https://explorer.hiro.so/sandbox/faucet?chain=testnet
  *   3. Fund it with testnet sBTC. The deployer's own key does not hold any
- *      and cannot mint it -- it has to come via a SIP-010 transfer from
- *      ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM, the same byte-identical
- *      sBTC deployment, which holds a real balance (confirmed live,
- *      docs/TESTNET_STAGING.md action 5). That address's key is the
- *      well-known PUBLIC Clarinet default -- this script deliberately does
- *      NOT embed it or sign as it; obtaining the transfer is a manual,
+ *      and cannot mint it. SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1 is the
+ *      byte-identical sBTC CONTRACT (full protocol-mint/-burn/-lock
+ *      interface, a real bridge-style deployment) -- it is NOT a funded
+ *      holder; confirmed live, its own principal holds zero. Balances exist
+ *      on individual holders of this token, so a working transfer has to
+ *      come from SOME address that already holds some -- confirmed live,
+ *      one busy address did exactly that on 2026-10-14. This script never
+ *      signs as any of them; obtaining sBTC however you do it is a manual,
  *      operator-performed step, same boundary deploy-testnet.mjs's own
  *      proveBC1 draws around "OTHER", a principal the signing key does not
  *      control. This script only checks the resulting balance and tells you
@@ -74,7 +76,7 @@ const { STACKS_TESTNET } = networkPkg;
 import walletPkg from "@stacks/wallet-sdk";
 const { generateWallet } = walletPkg;
 import { readFileSync } from "fs";
-import { localize, assertFullyLocalized } from "./lib/testnet-localize.mjs";
+import { localize, assertFullyLocalized, TESTNET_EQUIVALENT } from "./lib/testnet-localize.mjs";
 import { callReadOnly as callReadOnlyRaw, assertEqual } from "./lib/testnet-readonly.mjs";
 
 const callReadOnly = (sender, contractAddress, contractName, fn, args = []) =>
@@ -87,10 +89,11 @@ const API       = "https://api.testnet.hiro.so";
 const EXPLORER  = "https://explorer.hiro.so/txid";
 const network   = STACKS_TESTNET;
 
-// Verified byte-identical to mainnet's canonical sBTC (SM3VDXK3…), see
-// scripts/lib/testnet-localize.mjs's TESTNET_EQUIVALENT table and
-// docs/TESTNET_STAGING.md section 5.2.
-const SBTC_TESTNET_ADDRESS = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+// Read off TESTNET_EQUIVALENT (not re-hardcoded here) specifically so this
+// can never drift from the one place that address is verified -- corrected
+// once already, 2026-10-14, when a hardcoded second copy of it here would
+// have silently kept pointing at the stale deployment.
+const SBTC_TESTNET_ADDRESS = TESTNET_EQUIVALENT.SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.testnet;
 const SBTC_TESTNET_NAME    = "sbtc-token";
 
 // Asset listing: 0.05% fee, matching the single-asset cores' convention
@@ -283,11 +286,13 @@ async function main() {
     console.error(`  buffer), have ${sbtcBalance}.`);
     console.error("");
     console.error("  Testnet sBTC does not come from a faucet and this key cannot mint it.");
-    console.error(`  It has to arrive as a SIP-010 transfer from the known byte-identical`);
-    console.error(`  sBTC deployment at ${SBTC_TESTNET_ADDRESS}`);
-    console.error("  (docs/TESTNET_STAGING.md section 5.2 / action 5) -- an operator-performed");
-    console.error(`  manual step, not something this script automates. Send at least`);
-    console.error(`  ${sbtcNeeded} sats of ${SBTC_TESTNET_ADDRESS}.${SBTC_TESTNET_NAME} to:`);
+    console.error(`  ${SBTC_TESTNET_ADDRESS}.${SBTC_TESTNET_NAME} is the byte-identical sBTC`);
+    console.error("  contract itself, not a funded holder -- its own principal holds zero.");
+    console.error("  It has to arrive as a SIP-010 transfer from SOME address that already");
+    console.error(`  holds a balance of this specific token (docs/TESTNET_STAGING.md section`);
+    console.error("  5.2) -- an operator-performed manual step, not something this script");
+    console.error(`  automates. Send at least ${sbtcNeeded} sats of`);
+    console.error(`  ${SBTC_TESTNET_ADDRESS}.${SBTC_TESTNET_NAME} to:`);
     console.error(`    ${DEPLOYER}`);
     console.error("  then re-run this script.");
     process.exit(1);

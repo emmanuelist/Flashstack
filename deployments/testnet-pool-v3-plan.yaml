@@ -46,11 +46,20 @@ deployer:
     stx-hard-stop-below-microstx: 200000000
     sbtc-hard-stop-below-sats: 10100        # DEPOSIT_AMOUNT + RECEIVER_SEED_AMOUNT
     sbtc-source: >-
-      Testnet sBTC does not come from a faucet and this key cannot mint it. It
-      must arrive as a SIP-010 transfer from ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-      (the byte-identical sBTC deployment, confirmed holding 8000000000 sats /
-      80 sBTC live on 2026-10-14), an operator-performed manual step — the
-      script checks the resulting balance, it does not sign as that address.
+      Testnet sBTC does not come from a faucet and this key cannot mint it.
+      SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1 is the byte-identical sBTC
+      contract, not a funded holder — confirmed live 2026-10-14, the
+      deployer address itself holds zero; this is a real bridge-interface
+      deployment where balances exist on individual holders via
+      protocol-mint, not stockpiled at the contract's own principal. A
+      working transfer has to come from SOME address that already holds a
+      balance of this token — confirmed live, one busy address
+      (STDMN71Z0H9EF8CRKAWTGBB5YS0BNV26HZ79QFFP, ~2.03 sBTC + ~991.7M
+      testnet STX, 4,578+ transactions, consistent with a distributor/
+      faucet, not independently confirmed as one) sent a real transfer this
+      way on 2026-10-14. However sBTC is actually obtained is an
+      operator-performed manual step either way — the script only checks
+      the resulting balance, it never signs as the source.
       Same boundary deploy-testnet.mjs's proveBC1 draws around "OTHER", a
       principal the signing key does not control.
 
@@ -72,7 +81,7 @@ localization:
         (contracts/test/sip-010-trait-ft-standard.clar via
         testnet-current-gen-plan.yaml's prerequisite run), so this rewrites to
         the deployer, not to a third party.
-    - ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM: >-
+    - SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1: >-
         NOT rewritten — this is the TESTNET_EQUIVALENT target itself (sBTC),
         passed as a literal contract-principal argument to add-asset/deposit/
         flash-loan/transfer, never embedded in source that gets localized.
@@ -86,7 +95,7 @@ localization:
 # Asset listing
 # ─────────────────────────────────────────────────────────────────────────────
 asset:
-  token: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token
+  token: SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token
   what: >-
     Verified byte-identical to mainnet's canonical sBTC (SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4),
     docs/TESTNET_STAGING.md section 5.2. NOT a mock — add-asset's live
@@ -157,13 +166,13 @@ transactions:
     contract: <deployer>.flashstack-pool-v3
     function: add-asset
     args:
-      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "principal SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token"
       - "uint 5"       # fee-bp
       - "uint 100000"  # max-loan, sats
     fee: 150000
     nonce-offset: 3
     asserts:
-      - is-listed(ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token) == true
+      - is-listed(SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token) == true
     evidence: { txid: null, block-height: null, status: null }
 
   - step: 5
@@ -180,7 +189,7 @@ transactions:
     contract: <deployer>.flashstack-pool-v3
     function: deposit
     args:
-      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "principal SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token"
       - "uint 10000"   # sats
     fee: 150000
     nonce-offset: 5
@@ -192,7 +201,7 @@ transactions:
 
   - step: 7
     type: sip-010-transfer
-    contract: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token
+    contract: SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token
     function: transfer
     args:
       - "uint 100"     # sats
@@ -212,7 +221,7 @@ transactions:
     contract: <deployer>.flashstack-pool-v3
     function: flash-loan
     args:
-      - "principal ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.sbtc-token"
+      - "principal SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token"
       - "uint 2000"    # sats borrowed
       - "principal <deployer>.pool-v3-test-receiver"
     fee: 200000

@@ -231,6 +231,44 @@ sBTC protocol instance. The distinction matters for what a staging run can claim
 Also: the 80 sBTC sits at a key anyone holds, so the balance can vanish between runs.
 Treat funding as a step in the procedure, not a precondition to assume.
 
+**Superseded 2026-10-14 — switched to a second, better deployment.** Found while
+funding the pool-v3 staging deployer (section 8 action 9): a real SIP-010 transfer of
+testnet sBTC landed on `SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token`, not on
+`ST1PQHQ…`. Investigated rather than assumed, same discipline as the rest of this
+section:
+
+- **All five contracts of the set re-verified byte-identical** to mainnet at this new
+  address too — same SHA-256 hashes, same byte counts as the `ST1PQHQ…` table above.
+- **This one looks like the real thing, not a test fixture.** `get-total-supply` reads
+  `u3611904974` (~36.1 sBTC) — a plausible, organically-grown figure, not `ST1PQHQ…`'s
+  21,000,000 sBTC pre-mint (the entire Bitcoin supply, artificial by inspection).
+  `get-current-signer-principal` resolves to a real testnet **multisig** principal
+  (version byte 21, `SN…` prefix), consistent with an actual bridge signer set rather
+  than a bootstrap placeholder. The registry exposes
+  `get-current-aggregate-pubkey`/`get-current-signer-data`/`get-current-signer-set` —
+  the real signer-management surface, present and apparently live.
+- **It is not a stockpile.** The contract's own principal holds zero — balances sit on
+  individual holders via `protocol-mint`, the way a real bridge actually works, not
+  pooled at the deployer for easy test distribution. A working transfer has to come
+  from some address that already holds a balance. One such address,
+  `STDMN71Z0H9EF8CRKAWTGBB5YS0BNV26HZ79QFFP`, holds ~2.03 sBTC and ~991.7M testnet STX
+  across 4,578+ transactions, consistent with a distributor or faucet — **not**
+  independently confirmed as one; record what's verifiable, not a guess about who runs
+  it.
+- **Not independently confirmed:** who operates this deployment, or whether it's
+  connected to a real Bitcoin-testnet bridge rather than another (better-built)
+  fixture. The evidence above is suggestive, not proof — record it as that.
+
+`scripts/lib/testnet-localize.mjs`'s `TESTNET_EQUIVALENT` entry and
+`scripts/deploy-testnet-pool-v3.mjs` both now point at
+`SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1`. `ST1PQHQ…`'s deployment is untouched and
+still holds its own balance — nothing about it was wrong, it simply stopped being the
+more useful of two valid choices. Same caveat as before, updated: evidence should read
+"staged against a byte-identical sBTC deployment at
+`SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1`", never "staged against canonical sBTC" or
+"the official testnet bridge" — this project has not independently confirmed who
+operates it.
+
 ### 5.3 ~~`flashstack-pool-v3` needs epoch 4.0 on testnet~~ — RESOLVED 2026-09-17
 
 **Testnet accepts Clarity 6. `flashstack-pool-v3` can be staged.** Verified by
