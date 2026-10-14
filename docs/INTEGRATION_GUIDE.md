@@ -40,7 +40,7 @@ Canonical sBTC token: `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token` (~4
 | `flashstack-sbtc-pool` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-pool` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-pool?chain=mainnet) |
 | `sbtc-flash-receiver-trait` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait?chain=mainnet) |
 | `sbtc-test-receiver` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver?chain=mainnet) |
-| `velar-sbtc-arb-receiver` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver?chain=mainnet) |
+| `velar-sbtc-arb-receiver` (non-functional, de-approved: hardcodes Velar pool `u70`, not sBTC/STX) | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver?chain=mainnet) |
 
 ---
 
