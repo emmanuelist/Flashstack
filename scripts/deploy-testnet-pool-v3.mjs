@@ -80,6 +80,7 @@ const { generateWallet } = walletPkg;
 import { readFileSync } from "fs";
 import { localize, assertFullyLocalized, TESTNET_EQUIVALENT } from "./lib/testnet-localize.mjs";
 import { callReadOnly as callReadOnlyRaw, assertEqual } from "./lib/testnet-readonly.mjs";
+import { contractExists } from "./lib/testnet-preconditions.mjs";
 
 const callReadOnly = (sender, contractAddress, contractName, fn, args = []) =>
   callReadOnlyRaw(API, sender, contractAddress, contractName, fn, args);
@@ -242,6 +243,30 @@ async function deployContract(privateKey, nonce, name, sourcePath, deployer, cla
   return txid;
 }
 
+// Deployment scars (CONTRACT_INVENTORY.md section 3): a contract name is
+// consumed permanently at a principal the moment a publish for it confirms,
+// whether or not a LATER run needs to repeat it. A from-scratch re-run of
+// this script after a partial success -- exactly what happens when an
+// earlier step failed and this one restarts -- would otherwise try to
+// republish names that already landed, and abort with ContractAlreadyExists
+// (caught live: a from-scratch retry hit exactly this on sip-010-trait-ft-
+// standard and flashstack-v3-receiver-trait, both already confirmed from
+// the previous run). Same resumability problem deploy-testnet.mjs's
+// --steps=admin solves for the stx-core-v2 line, solved here per-contract
+// instead of per-whole-script, since this script's steps are a mix of
+// fresh contracts and calls, not a single all-or-nothing line.
+//
+// Returns { txid, nonce }: txid is null and nonce is unchanged when the
+// contract already existed and nothing was broadcast.
+async function deployIfNeeded(privateKey, nonce, name, sourcePath, deployer, clarityVersion = ClarityVersion.Clarity3) {
+  if (await contractExists(API, deployer, name)) {
+    console.log(`  Already deployed at ${deployer}.${name} -- skipping (deployment scar). Nonce not consumed.`);
+    return { txid: null, nonce };
+  }
+  const txid = await deployContract(privateKey, nonce, name, sourcePath, deployer, clarityVersion);
+  return { txid, nonce: nonce + 1 };
+}
+
 async function callContract(privateKey, nonce, contractAddress, contractName, fn, args, fee = 100_000) {
   const tx = await makeContractCall({
     contractAddress,
@@ -328,50 +353,50 @@ async function main() {
   // this step rather than assumed away a second time.
   console.log("Step 1 — Deploy sip-010-trait-ft-standard");
   console.log("  (Local copy of the SIP-010 trait -- every later contract's use-trait needs it)");
-  results.sip010Trait = await deployContract(
-    privateKey, nonce++,
+  ({ txid: results.sip010Trait, nonce } = await deployIfNeeded(
+    privateKey, nonce,
     "sip-010-trait-ft-standard",
     "contracts/test/sip-010-trait-ft-standard.clar",
     DEPLOYER,
-  );
-  await waitForConfirm(results.sip010Trait, "deploy sip-010-trait-ft-standard");
+  ));
+  if (results.sip010Trait) await waitForConfirm(results.sip010Trait, "deploy sip-010-trait-ft-standard");
   console.log();
 
   // ── Step 2: flashstack-v3-receiver-trait ─────────────────────────────────
   console.log("Step 2 — Deploy flashstack-v3-receiver-trait");
   console.log("  (Generic receiver interface -- not yet deployed anywhere, mainnet or testnet)");
-  results.trait = await deployContract(
-    privateKey, nonce++,
+  ({ txid: results.trait, nonce } = await deployIfNeeded(
+    privateKey, nonce,
     "flashstack-v3-receiver-trait",
     "contracts/flashstack-v3-receiver-trait.clar",
     DEPLOYER,
-  );
-  await waitForConfirm(results.trait, "deploy flashstack-v3-receiver-trait");
+  ));
+  if (results.trait) await waitForConfirm(results.trait, "deploy flashstack-v3-receiver-trait");
   console.log();
 
   // ── Step 3: flashstack-pool-v3 ────────────────────────────────────────────
   console.log("Step 3 — Deploy flashstack-pool-v3");
   console.log("  (Generic multi-asset flash-loan + LP pool, Clarity 6 / epoch 4.0)");
-  results.pool = await deployContract(
-    privateKey, nonce++,
+  ({ txid: results.pool, nonce } = await deployIfNeeded(
+    privateKey, nonce,
     "flashstack-pool-v3",
     "contracts/flashstack-pool-v3.clar",
     DEPLOYER,
     ClarityVersion.Clarity6, // see deployContract's own comment for why this matters
-  );
-  await waitForConfirm(results.pool, "deploy flashstack-pool-v3");
+  ));
+  if (results.pool) await waitForConfirm(results.pool, "deploy flashstack-pool-v3");
   console.log();
 
   // ── Step 4: pool-v3-test-receiver ─────────────────────────────────────────
   console.log("Step 4 — Deploy pool-v3-test-receiver");
   console.log("  (Minimal happy-path receiver: repays principal + fee, fee read live)");
-  results.receiver = await deployContract(
-    privateKey, nonce++,
+  ({ txid: results.receiver, nonce } = await deployIfNeeded(
+    privateKey, nonce,
     "pool-v3-test-receiver",
     "contracts/pool-v3-test-receiver.clar",
     DEPLOYER,
-  );
-  await waitForConfirm(results.receiver, "deploy pool-v3-test-receiver");
+  ));
+  if (results.receiver) await waitForConfirm(results.receiver, "deploy pool-v3-test-receiver");
   console.log();
 
   // ── Step 5: List sBTC as an asset ─────────────────────────────────────────
@@ -461,6 +486,10 @@ async function main() {
   console.log(`  reserve before: ${reserveBefore}, reserve after: ${reserveAfter} (must have grown by >= the fee)`);
   console.log();
 
+  // Skipped-this-run contracts (deployment scar, deployIfNeeded) have no
+  // txid to show -- the real one is from an earlier run, not retrieved here.
+  const link = (txid) => txid ? `${EXPLORER}/${txid}?chain=testnet` : "(already deployed in an earlier run, no new txid this run)";
+
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log("╔══════════════════════════════════════════════════════╗");
   console.log("║      TESTNET DEPLOYMENT COMPLETE (pool-v3 line)      ║");
@@ -468,10 +497,10 @@ async function main() {
   console.log(`║  Deployer: ${DEPLOYER.padEnd(42)} ║`);
   console.log("╠══════════════════════════════════════════════════════╣");
   console.log("║  Contracts:                                          ║");
-  console.log(`  sip-010-trait-ft-standard:    ${EXPLORER}/${results.sip010Trait}?chain=testnet`);
-  console.log(`  flashstack-v3-receiver-trait: ${EXPLORER}/${results.trait}?chain=testnet`);
-  console.log(`  flashstack-pool-v3:           ${EXPLORER}/${results.pool}?chain=testnet`);
-  console.log(`  pool-v3-test-receiver:        ${EXPLORER}/${results.receiver}?chain=testnet`);
+  console.log(`  sip-010-trait-ft-standard:    ${link(results.sip010Trait)}`);
+  console.log(`  flashstack-v3-receiver-trait: ${link(results.trait)}`);
+  console.log(`  flashstack-pool-v3:           ${link(results.pool)}`);
+  console.log(`  pool-v3-test-receiver:        ${link(results.receiver)}`);
   console.log("╠══════════════════════════════════════════════════════╣");
   console.log("║  Actions:                                            ║");
   console.log(`  add-asset (sBTC):         ${EXPLORER}/${results.addAsset}?chain=testnet`);
