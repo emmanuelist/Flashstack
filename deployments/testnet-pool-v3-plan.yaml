@@ -147,7 +147,7 @@ transactions:
       (then "step 1") aborted with (err none), an unresolvable trait
       reference, 404 confirmed live on .sip-010-trait-ft-standard at this
       deployer before this step existed.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: 5daa93ce6bb6e438fcf149d69286290e9362c4263421305e1f4ac876a0f40008, block-height: 723549, status: success }
 
   - step: 2
     type: contract-publish
@@ -160,7 +160,7 @@ transactions:
     why: >-
       Generic receiver interface. Not yet deployed anywhere, mainnet or
       testnet — flashstack-pool-v3.clar's own header requires this first.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: fd7e32819f7c1acc9caec7b04dc61fb260deaef2c8a5dc73fe63faddf6c4899e, block-height: 723552, status: success }
 
   - step: 3
     type: contract-publish
@@ -171,7 +171,7 @@ transactions:
     fee: 500000
     nonce-offset: 2
     why: The generic multi-asset core this whole line exists to stage.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: 16b1e35eba85c4a71ee0e6afd4f6a389a82aad793abdf7498c0e3605c02bbb89, block-height: 723643, status: success }
 
   - step: 4
     type: contract-publish
@@ -185,7 +185,7 @@ transactions:
       Minimal happy-path receiver. Its contract-call? target is the STATIC
       `.flashstack-pool-v3` (pool-v3-test-receiver.clar) — same
       static-reference constraint stx-test-receiver-v2.clar documents.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: a8d869b3f1ab6b3ee065cf294854fe7ba13e31eaa484826c5366cd24682cd2d0, block-height: 723645, status: success }
 
   - step: 5
     type: contract-call
@@ -199,7 +199,7 @@ transactions:
     nonce-offset: 4
     asserts:
       - is-listed(SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token) == true
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: 33b15f69bdf9c6b5538e70a84991936804d46caed41d43644db2296635b128b9, block-height: 723648, status: success }
 
   - step: 6
     type: contract-call
@@ -208,7 +208,7 @@ transactions:
     args: [ "principal <deployer>.pool-v3-test-receiver" ]
     fee: 100000
     nonce-offset: 5
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: d4cf646e1a50d095cbade5ca8055fdb617b74d37b0c5716066db817376f45edf, block-height: 723650, status: success }
 
   - step: 7
     type: contract-call
@@ -223,7 +223,7 @@ transactions:
       pool-v3 has no separate admin-only reserve function the way the
       single-asset cores do (deposit-reserve) — deposit funds the per-asset
       reserve AND mints the depositor LP shares in one call.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: e73ee01fe8aff47a4924ae18f694d0d7b7556c093675bdc0103e5238da868c45, block-height: 723652, status: success }
 
   - step: 8
     type: sip-010-transfer
@@ -240,7 +240,7 @@ transactions:
       Fee buffer. A freshly deployed receiver holds 0 sBTC and cannot cover
       the fee on its own; without this the flash loan reverts before the
       pool's own invariant is even reached.
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: 1afefb0ad09ada89b7ffd4899e084342af8b3a21cb6e76deac903823aebdc465, block-height: 723655, status: success }
 
   - step: 9
     type: contract-call
@@ -258,7 +258,7 @@ transactions:
       borrow + repay in one transaction.
     asserts:
       - get-reserve(sbtc-token) after >= get-reserve(sbtc-token) before + 1
-    evidence: { txid: null, block-height: null, status: null }
+    evidence: { txid: de45aff486db933ea4426c61b9b76e4d9f9e420a72c32eafa4e9348ec0d4734a, block-height: 723657, status: success }
 
 # ─────────────────────────────────────────────────────────────────────────────
 totals:

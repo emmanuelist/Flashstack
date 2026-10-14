@@ -545,6 +545,79 @@ the run, decoded through `scripts/lib/testnet-readonly.mjs` — not the value th
 script printed during it. A row whose evidence cannot be reproduced that way
 does not get ticked.
 
+## 6d. `flashstack-pool-v3` testnet run — SUCCESS 2026-10-14
+
+`scripts/deploy-testnet-pool-v3.mjs` at `65e129b` (section 8 action 9), run against
+`flashstack-pool-v3` + `pool-v3-test-receiver` (`flashstack-v3-receiver-trait` and
+`sip-010-trait-ft-standard` already published from two earlier partial attempts the
+same day — the script's own `deployIfNeeded` skipped republishing them, see below).
+Deployer: `ST3XQ5DMH4BRXVZWAHKJFBNND17CPCSAYMV4T0NFT` (same identity as the STX
+line's §6a/§6c runs). Plan: `deployments/testnet-pool-v3-plan.yaml`. Every item below
+was independently re-verified against the live testnet API after the run — not taken
+from the script's own console output.
+
+**Getting here took three live-caught bugs, each fixed before the next attempt, not
+guessed at in advance:**
+1. `(err none)` on the very first publish (`flashstack-v3-receiver-trait`) — its
+   `use-trait` resolves `.sip-010-trait-ft-standard` under this deployer, wrongly
+   assumed already published from the STX line's own run (which publishes a
+   *different* trait, `stx-flash-receiver-trait`, that never touches SIP-010).
+   Confirmed via a live 404, fixed by adding the publish as a real step.
+2. `(err none)` again, this time on `flashstack-pool-v3` itself — the deploy helper
+   hardcoded Clarity 3 for every contract (copied from `deploy-testnet.mjs`, which
+   never deploys a Clarity 6 contract). Confirmed on the actual broadcast
+   (`clarity_version: 3`), fixed by passing `ClarityVersion.Clarity6` explicitly for
+   this one contract.
+3. `ContractAlreadyExists` on a from-scratch retry — the two already-confirmed trait
+   publishes from attempt 2 can't be re-broadcast (deployment scars,
+   `CONTRACT_INVENTORY.md` §3). Fixed by checking `contractExists()` before each of
+   the four publishes and skipping (nonce untouched) if already there.
+
+**Proven, with evidence (every txid `success`, independently re-checked against
+`/extended/v1/tx/0x<txid>`):**
+- [x] `flashstack-v3-receiver-trait` and `sip-010-trait-ft-standard` present at the
+      deployer (both from an earlier partial attempt the same day; re-confirmed live
+      via `/v2/contracts/interface/` returning `200`, not re-published this run)
+- [x] `flashstack-pool-v3` publish: [`16b1e35e…`](https://explorer.hiro.so/txid/16b1e35eba85c4a71ee0e6afd4f6a389a82aad793abdf7498c0e3605c02bbb89?chain=testnet),
+      block 723643, `(ok true)`
+- [x] `pool-v3-test-receiver` publish: [`a8d869b3…`](https://explorer.hiro.so/txid/a8d869b3f1ab6b3ee065cf294854fe7ba13e31eaa484826c5366cd24682cd2d0?chain=testnet),
+      block 723645, `(ok true)`
+- [x] `add-asset` (sBTC, `fee-bp` 5, `max-loan` 100000 sats):
+      [`33b15f69…`](https://explorer.hiro.so/txid/33b15f69bdf9c6b5538e70a84991936804d46caed41d43644db2296635b128b9?chain=testnet),
+      block 723648, `(ok true)`. Re-read after: `is-listed` = `true`,
+      `get-asset` = `{enabled: true, fee-bp: u5, max-loan: u100000, paused: false,
+      share-scale: u100000000}` — `share-scale` = 1e8 confirms the live
+      `get-decimals()` = 8 read against the real sBTC dependency (pv3-F2), not assumed
+- [x] `add-approved-receiver`: [`d4cf646e…`](https://explorer.hiro.so/txid/d4cf646e1a50d095cbade5ca8055fdb617b74d37b0c5716066db817376f45edf?chain=testnet),
+      block 723650, `(ok true)`. Re-read after: `is-approved-receiver` = `true`
+- [x] `deposit` (10,000 sats): [`e73ee01f…`](https://explorer.hiro.so/txid/e73ee01fe8aff47a4924ae18f694d0d7b7556c093675bdc0103e5238da868c45?chain=testnet),
+      block 723652, `(ok u1000000000000)` — 1e12 LP shares, exactly matching the
+      virtual-shares formula for a first deposit (`amount * share-scale / VIRTUAL-ASSETS`
+      = `10000 * 1e8 / 1`), not assumed
+- [x] Receiver fee-buffer seed (100 sats): [`1afefb0a…`](https://explorer.hiro.so/txid/1afefb0ad09ada89b7ffd4899e084342af8b3a21cb6e76deac903823aebdc465?chain=testnet),
+      block 723655, `(ok true)`
+- [x] **Flash loan — THE testnet evidence**: [`de45aff4…`](https://explorer.hiro.so/txid/de45aff486db933ea4426c61b9b76e4d9f9e420a72c32eafa4e9348ec0d4734a?chain=testnet),
+      block 723657, `(ok true)`. `get-reserve` before/after, read live: `u10000` →
+      `u10001`, grew by exactly the 1-sat fee (`raw-fee = (2000 * 5) / 10000 = 1`,
+      the `u0`-floor-to-`u1` path is not reached at this size). Receiver's own
+      sBTC balance, read live: `99` sats — 100 seeded + 2,000 borrowed − 2,001 repaid,
+      every sat accounted for, not just "the tx succeeded"
+- [x] `get-asset` after the loan: `total-loans: u1`, `total-volume: u2000`,
+      `total-fees: u1` — all three stats match the single loan above exactly
+
+**NOT proven by this run — genuinely open, not implied by the above:**
+- [ ] Non-repaying or under-paying receiver reverts — no such receiver exists for
+      `flashstack-pool-v3` yet. `stx-underpay-receiver-v2.clar` (PR #110) is the
+      precedent for `flashstack-stx-core-v2` only, not this contract.
+- [ ] Unapproved receiver is rejected — needs no new contract, but no step here
+      performs it
+- [ ] Multi-asset behavior (a second listed asset, cross-asset flows, the per-asset
+      reentrancy lock design doc section 13 describes) — this run lists exactly one
+      asset (sBTC)
+- [ ] `flashstack-stx-pool-v3` and `flashstack-sbtc-core-v2` — separate contracts,
+      each needs its own receiver, deliberately not folded into this run (see
+      `deploy-testnet-pool-v3.mjs`'s own header)
+
 ---
 
 ## 7. What is deliberately not in this document
@@ -577,13 +650,12 @@ would broadcast contracts still carrying mainnet principals (§5.1).
 | 6 | ~~Write `deployments/testnet-current-gen-plan.yaml`~~ | **DONE 2026-09-21** — written from `deploy-testnet.mjs`, `evidence:` slots empty pending a run |
 | 7 | Execute the stage and record evidence | A funded testnet deployer — **operator only** |
 | 8 | Re-run §6a against the corrected Step 8 (`a92fb8e`) | **Route A chosen**; `--steps=admin` in PR #66. Then a funded key — operator only |
-| 9 | ~~Write a receiver + deploy script + plan for `flashstack-pool-v3`~~ | **DONE 2026-10-14** — `contracts/pool-v3-test-receiver.clar` (+ localized copy, D6 shape — its `execute-flash` takes `<sip-010-trait>` as a parameter, which needs the same canonical/contracts-test pairing `flashstack-pool-v3` itself uses), `scripts/deploy-testnet-pool-v3.mjs`, `deployments/testnet-pool-v3-plan.yaml`. `clarinet check` and the full suite both pass with the new files. Not yet run — needs action 7's operator steps, same as the rest of this line |
+| 9 | ~~Write a receiver + deploy script + plan for `flashstack-pool-v3`~~ | **DONE 2026-10-14** — `contracts/pool-v3-test-receiver.clar` (+ localized copy, D6 shape — its `execute-flash` takes `<sip-010-trait>` as a parameter, which needs the same canonical/contracts-test pairing `flashstack-pool-v3` itself uses), `scripts/deploy-testnet-pool-v3.mjs`, `deployments/testnet-pool-v3-plan.yaml`. `clarinet check` and the full suite both pass with the new files. |
+| 10 | ~~Execute the pool-v3 stage and record evidence~~ | **DONE 2026-10-14 — see §6d.** Operator-run; three live-caught bugs fixed across three attempts (missing trait publish, wrong Clarity version, deployment-scar resumability), fourth attempt succeeded end to end. All 7 new txids independently re-verified, state reconciles exactly (reserve, receiver balance, loan/volume/fee stats). |
 
-**All three original blockers are now closed, and the pool-v3 line's own mechanical
-work (action 9) is done.** What remains for `flashstack-pool-v3` specifically is
-purely operational: a funded testnet wallet (shared with the STX line, see §3) plus
-testnet sBTC obtained via manual transfer from the known byte-identical holder
-(`ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM`, confirmed live 2026-10-14 holding
-8,000,000,000 sats), then running
-`TESTNET_MNEMONIC="..." node scripts/deploy-testnet-pool-v3.mjs`. None of this needs
-an owner decision — it's execution, not a question.
+**All three original blockers are closed, and `flashstack-pool-v3` is now staged on
+testnet with real, independently-verified evidence (§6d) — not just "stageable."**
+Still open for this line: the two §6d "not proven" items (non-repaying/under-paying
+receiver, unapproved receiver, multi-asset behavior), and `flashstack-stx-pool-v3` /
+`flashstack-sbtc-core-v2` remain entirely unstaged, each needing its own receiver.
+None of this needs an owner decision — it's further execution, not a question.
