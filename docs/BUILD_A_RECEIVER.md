@@ -48,9 +48,9 @@ All FlashStack contracts are under `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5`.
 | `flashstack-sbtc-core` | sBTC flash loan engine |
 | `stx-flash-receiver-trait` | STX callback interface |
 | `sbtc-flash-receiver-trait` | sBTC callback interface |
-| `stx-test-receiver` | Minimal working STX receiver |
-| `sbtc-test-receiver` | Minimal working sBTC receiver |
-| `bitflow-arb-receiver-v4` | Live STX/stSTX arb on Bitflow |
+| `stx-test-receiver` | **De-approved (F-10)** — no `contract-caller` check; a loan naming it returns `(err u306)` |
+| `sbtc-test-receiver` | **De-approved (F-10)** — no `contract-caller` check; a loan naming it returns `(err u306)` |
+| `bitflow-arb-receiver-v4` | **De-approved (F-10)** — no `contract-caller` check. Hardened rewrite: `contracts/bitflow-arb-receiver-v5.clar`, not yet deployed |
 | `velar-sbtc-arb-receiver` | **Non-functional, de-approved** — hardcodes Velar pool `u70`, which is not an sBTC/STX pool (see `docs/security/FINDINGS_REGISTER.md` F-10) |
 
 Canonical sBTC token: `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token`
@@ -72,15 +72,19 @@ Minimum working receiver:
 ```clarity
 (impl-trait 'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 
+(define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
+
 (define-public (execute-stx-flash (amount uint) (core principal))
   (let (
     ;; Look up the current fee rate dynamically — never hardcode
-    (fee-bp    (unwrap! (contract-call? 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core
-                  get-fee-basis-points) (err u500)))
+    (fee-bp    (unwrap! (contract-call? CORE get-fee-basis-points) (err u500)))
     (raw-fee   (/ (* amount fee-bp) u10000))
     (fee       (if (> raw-fee u0) raw-fee u1))  ;; minimum 1 microSTX
     (total-owed (+ amount fee))
   )
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) (err u403))
+
     ;; --- YOUR STRATEGY GOES HERE ---
     ;; (amount) microSTX is already in this contract at this point.
     ;; Execute swaps, liquidations, or any on-chain call.
@@ -88,7 +92,7 @@ Minimum working receiver:
     ;; --- END STRATEGY ---
 
     ;; Repay principal + fee to the core contract
-    (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) (err u501))
+    (unwrap! (as-contract (stx-transfer? total-owed tx-sender CORE)) (err u501))
     (ok true)
   )
 )
@@ -101,6 +105,7 @@ Minimum working receiver:
 3. **Use literal principals for trait arguments.** If you call a function that takes `<ft-trait>`, write the principal inline (e.g., `'SP102V8P0F7JX67ARQ77WEA3D3CFB5XW39REDT0AM.token-alex`). Using a `define-constant` for a trait argument will fail Clarity's static analysis.
 4. **Minimum fee is 1 microSTX.** For tiny loans, `(/ (* amount fee-bp) u10000)` rounds to zero. The template handles this with `(if (> raw-fee u0) raw-fee u1)`.
 5. **Deploying under your own wallet? Use absolute principals — never `.contract` sugar.** The in-repo example contracts call the core as `.flashstack-stx-core`. That sugar resolves to *the deploying address*, so it works **only** because those examples are deployed under the protocol deployer. Under your own wallet, `.flashstack-stx-core` resolves to `YOUR-ADDRESS.flashstack-stx-core` — a contract that doesn't exist — and every core call fails. Always write the full `'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core`, exactly as every template in this guide does.
+6. **Gate the callback and hardcode the repay target (F-10).** Assert `(is-eq contract-caller CORE)` before anything else, and repay to the `CORE` constant, never to the `core` argument. Without that, anyone can call `execute-stx-flash` directly, and removing the receiver from the whitelist doesn't stop it. Run [docs/security/RECEIVER_VETTING.md](security/RECEIVER_VETTING.md) before asking for approval.
 
 ### A Real Strategy: DEX Arbitrage
 
@@ -110,15 +115,19 @@ Minimum working receiver:
 (define-constant ERR-SWAP-FAILED  (err u501))
 (define-constant ERR-NO-PROFIT    (err u502))
 (define-constant ERR-REPAY-FAILED (err u503))
+(define-constant ERR-NOT-CORE     (err u505))
+(define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 
 (define-public (execute-stx-flash (amount uint) (core principal))
   (let (
-    (fee-bp    (unwrap! (contract-call? 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core
-                  get-fee-basis-points) ERR-REPAY-FAILED))
+    (fee-bp    (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY-FAILED))
     (raw-fee   (/ (* amount fee-bp) u10000))
     (fee       (if (> raw-fee u0) raw-fee u1))
     (total-owed (+ amount fee))
   )
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) ERR-NOT-CORE)
+
     ;; Leg 1: swap STX for some token on your chosen DEX
     ;; (unwrap! (as-contract (contract-call? 'YOUR-DEX swap-x-for-y ...)) ERR-SWAP-FAILED)
 
@@ -128,7 +137,7 @@ Minimum working receiver:
     ;; Verify we came out ahead
     (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
       (asserts! (>= stx-bal total-owed) ERR-NO-PROFIT)
-      (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) ERR-REPAY-FAILED)
+      (unwrap! (as-contract (stx-transfer? total-owed tx-sender CORE)) ERR-REPAY-FAILED)
       (ok true)
     )
   )
@@ -145,7 +154,7 @@ Minimum working receiver:
 )
 ```
 
-Live example to read: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow-arb-receiver.clar) (deployed as `bitflow-arb-receiver-v4` on mainnet) and [contracts/alex-arb-receiver.clar](../contracts/alex-arb-receiver.clar). **Read them for the swap logic — but they use `.flashstack-stx-core` sugar (see rule 5). If you deploy under your own wallet, copy the absolute-principal form from the templates above, not the sugar.**
+Examples to read: [contracts/bitflow-arb-receiver-v5.clar](../contracts/bitflow-arb-receiver-v5.clar) (not yet deployed) and [contracts/alex-arb-receiver-v5.clar](../contracts/alex-arb-receiver-v5.clar) (approved on `flashstack-stx-core`). The originals they replace, `bitflow-arb-receiver.clar` (deployed as `bitflow-arb-receiver-v4`) and `alex-arb-receiver.clar`, are de-approved under F-10 — don't copy them. **Read them for the swap logic — but they use `.flashstack-stx-core` sugar (see rule 5). If you deploy under your own wallet, copy the absolute-principal form from the templates above, not the sugar.**
 
 ---
 
@@ -157,21 +166,24 @@ Live example to read: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow
 (impl-trait 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait.sbtc-flash-receiver-trait)
 
 (define-constant SBTC 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
+(define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core)
 
 (define-public (execute-sbtc-flash (amount uint) (core principal))
   (let (
-    (fee-bp  (unwrap! (contract-call? 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core
-                get-fee-basis-points) (err u500)))
+    (fee-bp  (unwrap! (contract-call? CORE get-fee-basis-points) (err u500)))
     (raw-fee (/ (* amount fee-bp) u10000))
     (fee     (if (> raw-fee u0) raw-fee u1))
     (owed    (+ amount fee))
   )
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) (err u403))
+
     ;; --- YOUR STRATEGY ---
     ;; (amount) canonical sBTC satoshis are in this contract.
     ;; --- END STRATEGY ---
 
     ;; Repay principal + fee
-    (unwrap! (as-contract (contract-call? SBTC transfer owed tx-sender core none)) (err u501))
+    (unwrap! (as-contract (contract-call? SBTC transfer owed tx-sender CORE none)) (err u501))
     (ok true)
   )
 )

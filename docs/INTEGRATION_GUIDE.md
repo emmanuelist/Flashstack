@@ -26,8 +26,8 @@ All contracts are under deployer `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5` on 
 | `flashstack-stx-pool` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-pool` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-pool?chain=mainnet) |
 | `flashstack-pool-oracle` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-pool-oracle` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-pool-oracle?chain=mainnet) |
 | `stx-flash-receiver-trait` | `SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait` | [View](https://explorer.hiro.so/address/SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait?chain=mainnet) |
-| `stx-test-receiver` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver?chain=mainnet) |
-| `bitflow-arb-receiver-v4` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) |
+| `stx-test-receiver` (de-approved, F-10: no `contract-caller` check) | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver?chain=mainnet) |
+| `bitflow-arb-receiver-v4` (de-approved, F-10: no `contract-caller` check) | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) |
 | `flashstack-yield-vault-v4` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-yield-vault-v4` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-yield-vault-v4?chain=mainnet) |
 
 ### sBTC Flash Loans
@@ -39,7 +39,7 @@ Canonical sBTC token: `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token` (~4
 | `flashstack-sbtc-core` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core?chain=mainnet) |
 | `flashstack-sbtc-pool` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-pool` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-pool?chain=mainnet) |
 | `sbtc-flash-receiver-trait` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait?chain=mainnet) |
-| `sbtc-test-receiver` | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver?chain=mainnet) |
+| `sbtc-test-receiver` (de-approved, F-10: no `contract-caller` check) | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver?chain=mainnet) |
 | `velar-sbtc-arb-receiver` (non-functional, de-approved: hardcodes Velar pool `u70`, not sBTC/STX) | `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver?chain=mainnet) |
 
 ---
@@ -85,6 +85,7 @@ Every STX receiver must implement the `stx-flash-receiver-trait`. The minimum wo
 
 (define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 (define-constant ERR-REPAY (err u500))
+(define-constant ERR-NOT-CORE (err u403))
 
 (define-public (execute-stx-flash (amount uint) (core principal))
   (let (
@@ -94,6 +95,9 @@ Every STX receiver must implement the `stx-flash-receiver-trait`. The minimum wo
     (fee       (if (> raw-fee u0) raw-fee u1))
     (total-owed (+ amount fee))
   )
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) ERR-NOT-CORE)
+
     ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
     ;; (amount) microSTX is in this contract right now.
     ;; Call DEX swaps, liquidations, or any on-chain function.
@@ -102,7 +106,7 @@ Every STX receiver must implement the `stx-flash-receiver-trait`. The minimum wo
     ;; ─────────────────────────────────────────────────────────
 
     ;; Repay principal + fee — must use as-contract
-    (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) ERR-REPAY)
+    (unwrap! (as-contract (stx-transfer? total-owed tx-sender CORE)) ERR-REPAY)
     (ok true)
   )
 )
@@ -185,6 +189,7 @@ The sBTC flow is identical to STX with two differences: the trait and the repaym
 (define-constant SBTC_CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core)
 (define-constant SBTC      'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
 (define-constant ERR-REPAY (err u500))
+(define-constant ERR-NOT-CORE (err u403))
 
 (define-public (execute-sbtc-flash (amount uint) (core principal))
   (let (
@@ -193,13 +198,16 @@ The sBTC flow is identical to STX with two differences: the trait and the repaym
     (fee       (if (> raw-fee u0) raw-fee u1))
     (total-owed (+ amount fee))
   )
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller SBTC_CORE) ERR-NOT-CORE)
+
     ;; ── YOUR STRATEGY ────────────────────────────────────────
     ;; (amount) canonical sBTC satoshis are in this contract.
     ;; ─────────────────────────────────────────────────────────
 
     ;; Repay canonical sBTC — use the token contract, not stx-transfer?
     (unwrap! (as-contract
-      (contract-call? SBTC transfer total-owed tx-sender core none))
+      (contract-call? SBTC transfer total-owed tx-sender SBTC_CORE none))
       ERR-REPAY)
     (ok true)
   )
@@ -229,11 +237,11 @@ const tx = await makeContractCall({
 
 Borrow STX, execute a round-trip swap on a Stacks DEX, repay, keep the spread.
 
-**Live example:** `bitflow-arb-receiver-v4` borrows STX, swaps STX→stSTX→STX on Bitflow's stableswap (`SPQC38PW542EQJ5M11CR25P7BS1CA6QT4TBXGB3M.stableswap-stx-ststx-v-1-2`), repays principal + fee, and the spread stays in the receiver for the caller.
+**Example:** `bitflow-arb-receiver-v4` borrowed STX, swapped STX→stSTX→STX on Bitflow's stableswap (`SPQC38PW542EQJ5M11CR25P7BS1CA6QT4TBXGB3M.stableswap-stx-ststx-v-1-2`) and repaid principal + fee. **It is de-approved (F-10, no `contract-caller` check) — don't copy it.** Read the hardened rewrite [contracts/bitflow-arb-receiver-v5.clar](../contracts/bitflow-arb-receiver-v5.clar) instead (not yet deployed).
 
 Confirmed mainnet arb tx: `0xabd33fc46ffa204ce61f25664f057e414063f28ce75c8387a6df9116453110cb`
 
-Source: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow-arb-receiver.clar)
+Source of the de-approved original, for the swap legs only: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow-arb-receiver.clar)
 
 > ⚠️ **Reading the in-repo examples?** They reference the core with `.contract` sugar (e.g. `.flashstack-stx-core`), which resolves to **the deployer's own address**. That works only because they are deployed under the protocol deployer. If you deploy under **your own** wallet, `.flashstack-stx-core` would resolve to `YOUR-ADDRESS.flashstack-stx-core` — a contract that doesn't exist — and every core call fails. **Always use the absolute principal** `'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core`, exactly as the templates above do.
 
@@ -251,7 +259,7 @@ Source: [contracts/bitflow-arb-receiver.clar](../contracts/bitflow-arb-receiver.
   ;; Verify profitable and repay
   (let ((stx-bal (stx-get-balance (as-contract tx-sender))))
     (asserts! (>= stx-bal total-owed) ERR-NO-PROFIT)
-    (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) ERR-REPAY)
+    (unwrap! (as-contract (stx-transfer? total-owed tx-sender FLASH-CORE)) ERR-REPAY) ;; hardcoded core, gated as in the liquidation pattern below
     (ok true)
   )
 )
