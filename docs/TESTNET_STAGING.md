@@ -527,9 +527,12 @@ not taken from the script's own success output.
       commit SHA staged
 
 **NOT proven by this run — genuinely open, not implied by the above:**
-- [ ] Flash loan with a non-repaying receiver reverts — **no non-repaying
-      receiver contract exists for this core.** One has to be written and
-      published before this item can be attempted at all.
+- [ ] Flash loan with a non-repaying receiver reverts — receiver now written:
+      `contracts/stx-underpay-receiver-v2.clar` repays 1 µSTX short and is
+      proven in simnet (`tests/stx-core-v2-underpay.test.ts`: `err u302`,
+      reserve read back unchanged). Still not run on testnet: it has to be
+      published, whitelisted, funded with a buffer ≥ the fee, then borrowed
+      against, with `get-reserve-balance` read back afterwards
 - [ ] Unapproved receiver is rejected — needs no new contract, but no step in
       the plan performs it
 - [x] ~~The negative case BC1 exists to prevent~~ — proven separately with a
