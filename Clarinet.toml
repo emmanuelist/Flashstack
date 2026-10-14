@@ -352,6 +352,13 @@ path = "contracts/stx-test-receiver-v2.clar"
 clarity_version = 3
 epoch = "latest"
 
+# Deliberately under-repays flashstack-stx-core-v2 by 1 uSTX (solvency check,
+# Flashstack-ajv.6.4). Same remote-trait epoch constraint as stx-test-receiver-v2.
+[contracts.stx-underpay-receiver-v2]
+path = "contracts/stx-underpay-receiver-v2.clar"
+clarity_version = 3
+epoch = "latest"
+
 [contracts.flashstack-sbtc-pool-v3]
 path = "contracts/test/flashstack-sbtc-pool-v3.clar"
 clarity_version = 3
