@@ -107,15 +107,17 @@ Any Clarity contract implementing the receiver trait can borrow. New to Clarity?
 (define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let (
-    (fee-bp     (unwrap! (contract-call? CORE get-fee-basis-points) (err u500)))
-    (fee        (let ((raw (/ (* amount fee-bp) u10000))) (if (> raw u0) raw u1)))
-  )
+  (begin
     ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
     (asserts! (is-eq contract-caller CORE) (err u403))
-    ;; ...your strategy here — `amount` STX is already in this contract...
-    (unwrap! (as-contract (stx-transfer? (+ amount fee) tx-sender CORE)) (err u500))
-    (ok true)
+    (let (
+      (fee-bp     (unwrap! (contract-call? CORE get-fee-basis-points) (err u500)))
+      (fee        (let ((raw (/ (* amount fee-bp) u10000))) (if (> raw u0) raw u1)))
+    )
+      ;; ...your strategy here — `amount` STX is already in this contract...
+      (unwrap! (as-contract (stx-transfer? (+ amount fee) tx-sender CORE)) (err u500))
+      (ok true)
+    )
   )
 )
 ```

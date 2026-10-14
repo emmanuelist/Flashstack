@@ -88,26 +88,27 @@ Every STX receiver must implement the `stx-flash-receiver-trait`. The minimum wo
 (define-constant ERR-NOT-CORE (err u403))
 
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let (
-    ;; Always fetch the fee dynamically — never hardcode
-    (fee-bp    (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY))
-    (raw-fee   (/ (* amount fee-bp) u10000))
-    (fee       (if (> raw-fee u0) raw-fee u1))
-    (total-owed (+ amount fee))
-  )
+  (begin
     ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
     (asserts! (is-eq contract-caller CORE) ERR-NOT-CORE)
+    (let (
+      ;; Always fetch the fee dynamically — never hardcode
+      (fee-bp    (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY))
+      (raw-fee   (/ (* amount fee-bp) u10000))
+      (fee       (if (> raw-fee u0) raw-fee u1))
+      (total-owed (+ amount fee))
+    )
+      ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
+      ;; (amount) microSTX is in this contract right now.
+      ;; Call DEX swaps, liquidations, or any on-chain function.
+      ;; You must have (total-owed) microSTX in this contract
+      ;; before the next line executes.
+      ;; ─────────────────────────────────────────────────────────
 
-    ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
-    ;; (amount) microSTX is in this contract right now.
-    ;; Call DEX swaps, liquidations, or any on-chain function.
-    ;; You must have (total-owed) microSTX in this contract
-    ;; before the next line executes.
-    ;; ─────────────────────────────────────────────────────────
-
-    ;; Repay principal + fee — must use as-contract
-    (unwrap! (as-contract (stx-transfer? total-owed tx-sender CORE)) ERR-REPAY)
-    (ok true)
+      ;; Repay principal + fee — must use as-contract
+      (unwrap! (as-contract (stx-transfer? total-owed tx-sender CORE)) ERR-REPAY)
+      (ok true)
+    )
   )
 )
 ```
@@ -192,24 +193,25 @@ The sBTC flow is identical to STX with two differences: the trait and the repaym
 (define-constant ERR-NOT-CORE (err u403))
 
 (define-public (execute-sbtc-flash (amount uint) (core principal))
-  (let (
-    (fee-bp    (unwrap! (contract-call? SBTC_CORE get-fee-basis-points) ERR-REPAY))
-    (raw-fee   (/ (* amount fee-bp) u10000))
-    (fee       (if (> raw-fee u0) raw-fee u1))
-    (total-owed (+ amount fee))
-  )
+  (begin
     ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
     (asserts! (is-eq contract-caller SBTC_CORE) ERR-NOT-CORE)
+    (let (
+      (fee-bp    (unwrap! (contract-call? SBTC_CORE get-fee-basis-points) ERR-REPAY))
+      (raw-fee   (/ (* amount fee-bp) u10000))
+      (fee       (if (> raw-fee u0) raw-fee u1))
+      (total-owed (+ amount fee))
+    )
+      ;; ── YOUR STRATEGY ────────────────────────────────────────
+      ;; (amount) canonical sBTC satoshis are in this contract.
+      ;; ─────────────────────────────────────────────────────────
 
-    ;; ── YOUR STRATEGY ────────────────────────────────────────
-    ;; (amount) canonical sBTC satoshis are in this contract.
-    ;; ─────────────────────────────────────────────────────────
-
-    ;; Repay canonical sBTC — use the token contract, not stx-transfer?
-    (unwrap! (as-contract
-      (contract-call? SBTC transfer total-owed tx-sender SBTC_CORE none))
-      ERR-REPAY)
-    (ok true)
+      ;; Repay canonical sBTC — use the token contract, not stx-transfer?
+      (unwrap! (as-contract
+        (contract-call? SBTC transfer total-owed tx-sender SBTC_CORE none))
+        ERR-REPAY)
+      (ok true)
+    )
   )
 )
 ```
@@ -284,31 +286,32 @@ Borrow the debt amount, call the lending protocol's liquidation function, receiv
 (define-constant FLASH-CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let (
-    (fee-bp    (unwrap! (contract-call? FLASH-CORE get-fee-basis-points) ERR-REPAY))
-    (raw-fee   (/ (* amount fee-bp) u10000))
-    (fee       (if (> raw-fee u0) raw-fee u1))
-    (total-owed (+ amount fee))
-  )
+  (begin
     ;; Only FLASH-CORE may invoke this callback
     (asserts! (is-eq contract-caller FLASH-CORE) ERR-NOT-CORE)
     (asserts! (is-eq core FLASH-CORE) ERR-NOT-CORE) ;; defense-in-depth
+    (let (
+      (fee-bp    (unwrap! (contract-call? FLASH-CORE get-fee-basis-points) ERR-REPAY))
+      (raw-fee   (/ (* amount fee-bp) u10000))
+      (fee       (if (> raw-fee u0) raw-fee u1))
+      (total-owed (+ amount fee))
+    )
+      ;; Repay borrower's debt to the lending protocol
+      (unwrap! (as-contract
+        (contract-call? 'LENDING-PROTOCOL liquidation-call
+          borrower-address
+          debt-amount
+          collateral-token))
+        ERR-LIQUIDATION)
 
-    ;; Repay borrower's debt to the lending protocol
-    (unwrap! (as-contract
-      (contract-call? 'LENDING-PROTOCOL liquidation-call
-        borrower-address
-        debt-amount
-        collateral-token))
-      ERR-LIQUIDATION)
-
-    ;; Now we hold discounted collateral.
-    ;; If collateral is STX: verify balance and repay.
-    ;; If collateral is another token: swap it first, then repay.
-    (let ((stx-now (stx-get-balance (as-contract tx-sender))))
-      (asserts! (>= stx-now total-owed) ERR-NO-PROFIT)
-      (unwrap! (as-contract (stx-transfer? total-owed tx-sender FLASH-CORE)) ERR-REPAY)
-      (ok true)
+      ;; Now we hold discounted collateral.
+      ;; If collateral is STX: verify balance and repay.
+      ;; If collateral is another token: swap it first, then repay.
+      (let ((stx-now (stx-get-balance (as-contract tx-sender))))
+        (asserts! (>= stx-now total-owed) ERR-NO-PROFIT)
+        (unwrap! (as-contract (stx-transfer? total-owed tx-sender FLASH-CORE)) ERR-REPAY)
+        (ok true)
+      )
     )
   )
 )

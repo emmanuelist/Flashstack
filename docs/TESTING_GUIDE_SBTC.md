@@ -152,32 +152,33 @@ Any Clarity contract that implements the `sbtc-flash-receiver-trait` can borrow 
 ;; sBTC is already in this contract when this function runs.
 ;; You MUST repay amount + fee before this function returns.
 (define-public (execute-sbtc-flash (amount uint) (core principal))
-  (let (
-    ;; Get current fee rate from core
-    (fee-bp  (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY-FAILED))
-    (raw-fee (/ (* amount fee-bp) u10000))
-    (fee     (if (> raw-fee u0) raw-fee u1))  ;; minimum 1 sat
-    (owed    (+ amount fee))
-  )
+  (begin
     ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
     (asserts! (is-eq contract-caller CORE) ERR-NOT-CORE)
+    (let (
+      ;; Get current fee rate from core
+      (fee-bp  (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY-FAILED))
+      (raw-fee (/ (* amount fee-bp) u10000))
+      (fee     (if (> raw-fee u0) raw-fee u1))  ;; minimum 1 sat
+      (owed    (+ amount fee))
+    )
+      ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
+      ;; e.g. swap sBTC for USDA on Velar, arbitrage, liquidate
+      ;; The sBTC loan is already in this contract.
+      ;; ─────────────────────────────────────────────────────────
 
-    ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
-    ;; e.g. swap sBTC for USDA on Velar, arbitrage, liquidate
-    ;; The sBTC loan is already in this contract.
-    ;; ─────────────────────────────────────────────────────────
-
-    ;; Repay principal + fee to core
-    (unwrap!
-      (as-contract (contract-call? SBTC transfer owed tx-sender CORE none))
-      ERR-REPAY-FAILED)
-    (ok true)
+      ;; Repay principal + fee to core
+      (unwrap!
+        (as-contract (contract-call? SBTC transfer owed tx-sender CORE none))
+        ERR-REPAY-FAILED)
+      (ok true)
+    )
   )
 )
 ```
 
 **Key points:**
-- Assert `contract-caller` is the core and repay to the `CORE` constant, never the `core` argument (F-10, `docs/security/RECEIVER_VETTING.md`)
+- Assert `contract-caller` is the core as the first expression, before the fee lookup, and repay to the `CORE` constant, never the `core` argument (F-10, `docs/security/RECEIVER_VETTING.md`)
 - Use `as-contract` when calling `transfer` — the contract is the sender, not tx-sender
 - The fee is minimum 1 sat regardless of amount
 - Pre-fund your receiver with enough sBTC to cover the fee if your strategy doesn't generate surplus
