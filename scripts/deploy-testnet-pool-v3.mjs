@@ -214,7 +214,15 @@ async function broadcast(tx) {
   return txid;
 }
 
-async function deployContract(privateKey, nonce, name, sourcePath, deployer) {
+// clarityVersion defaults to Clarity3 -- correct for every contract in this
+// deploy EXCEPT flashstack-pool-v3 itself, which is Clarity 6 (Clarinet.toml's
+// own registration, and its header: "migrated 2026-09-09" to as-contract?/
+// with-ft, Clarity 4+ only syntax). Caught live: the first attempt hardcoded
+// Clarity3 for every deploy (copied from deploy-testnet.mjs, which only ever
+// deploys Clarity 3 contracts for the single-asset line) and pool-v3's
+// publish aborted with (err none) -- confirmed on chain, the broadcast
+// genuinely carried clarity_version: 3, not a dependency problem this time.
+async function deployContract(privateKey, nonce, name, sourcePath, deployer, clarityVersion = ClarityVersion.Clarity3) {
   const raw    = readFileSync(sourcePath, "utf8");
   const source = patchSource(raw, deployer, name);
   const tx = await makeContractDeploy({
@@ -222,7 +230,7 @@ async function deployContract(privateKey, nonce, name, sourcePath, deployer) {
     codeBody:          source,
     senderKey:         privateKey,
     network,
-    clarityVersion:    ClarityVersion.Clarity3,
+    clarityVersion,
     postConditionMode: PostConditionMode.Allow,
     anchorMode:        1,
     fee:               500_000,
@@ -349,6 +357,7 @@ async function main() {
     "flashstack-pool-v3",
     "contracts/flashstack-pool-v3.clar",
     DEPLOYER,
+    ClarityVersion.Clarity6, // see deployContract's own comment for why this matters
   );
   await waitForConfirm(results.pool, "deploy flashstack-pool-v3");
   console.log();
