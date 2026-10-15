@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { useStacks } from "@/lib/hooks/useStacks";
 import { useStxFlashLoan } from "@/lib/hooks/useStxFlashLoan";
+import { useProtocolStats } from "@/lib/hooks/useProtocolStats";
+import { useReceiverStatus } from "@/lib/hooks/useReceiverStatus";
 import { STX_CONTRACT_ADDRESS, STX_CONTRACT_NAME, STX_RECEIVER_CONTRACTS } from "@/lib/stacks/config";
 import { StatCard } from "@/components/dashboard/StatCard";
+import { CoreStatusBadge, ReceiverNotApproved, NoApprovedReceivers } from "./ReceiverStatus";
 
 const FEE_BP = 5; // 0.05%
 
@@ -15,6 +18,8 @@ function formatStx(micro: bigint): string {
 export function StxFlashLoanForm() {
   const { isWalletConnected, connectWallet } = useStacks();
   const { status, txId, error, executeStxFlashLoan, reset } = useStxFlashLoan();
+  const { stats } = useProtocolStats();
+  const { corePaused, approved, unavailable } = useReceiverStatus("stx");
 
   const [amount, setAmount] = useState("");
   const [receiver, setReceiver] = useState(STX_RECEIVER_CONTRACTS[0].name);
@@ -33,6 +38,7 @@ export function StxFlashLoanForm() {
     return (
       <div className="bg-surface-card border border-surface-border rounded-xl p-8 text-center">
         <p className="text-slate-400 mb-4">Connect your wallet to execute STX flash loans</p>
+        {unavailable && <NoApprovedReceivers corePaused={corePaused} />}
         <button
           onClick={connectWallet}
           className="px-6 py-2.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
@@ -43,9 +49,11 @@ export function StxFlashLoanForm() {
     );
   }
 
+  const receiverRejected = corePaused === true || approved[receiver] === false;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountMicro || exceedsMax) return;
+    if (!amountMicro || exceedsMax || receiverRejected) return;
     await executeStxFlashLoan(String(amountMicro), receiver);
   };
 
@@ -53,14 +61,14 @@ export function StxFlashLoanForm() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Execute STX Flash Loan</h2>
-        <span className="text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-1 rounded-full">Active</span>
+        <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} />
       </div>
 
       {/* Info cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Fee Rate" value="0.05%" subtext="5 basis points" />
         <StatCard label="Max Single Loan" value="5,000 STX" subtext="Reserve-based, no collateral" />
-        <StatCard label="Reserve" value="80 STX" subtext="Protocol liquidity pool" />
+        <StatCard label="Reserve" value={stats ? `${(Number(stats.reserve) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 3 })} STX` : "..."} subtext="Protocol liquidity pool" />
       </div>
 
       <div className="bg-brand-500/5 border border-brand-500/20 rounded-xl p-4">
@@ -100,11 +108,12 @@ export function StxFlashLoanForm() {
           >
             {STX_RECEIVER_CONTRACTS.map((r) => (
               <option key={r.name} value={r.name}>
-                {r.label} — {r.description}
+                {r.label}: {r.description}{approved[r.name] === false ? " (not approved)" : ""}
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">{STX_CONTRACT_ADDRESS}.{receiver}</p>
+          <p className="text-xs text-slate-500 mt-1 break-all">{STX_CONTRACT_ADDRESS}.{receiver}</p>
+          {receiverRejected && <ReceiverNotApproved corePaused={corePaused} />}
         </div>
 
         {/* Preview */}
@@ -127,7 +136,7 @@ export function StxFlashLoanForm() {
 
         <button
           type="submit"
-          disabled={!amountMicro || status === "pending" || exceedsMax}
+          disabled={!amountMicro || status === "pending" || exceedsMax || receiverRejected}
           className="w-full px-6 py-3 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:bg-slate-700 disabled:text-slate-500 text-white transition-colors"
         >
           {status === "pending" ? "Submitting..." : "Execute STX Flash Loan"}
@@ -156,9 +165,9 @@ export function StxFlashLoanForm() {
         )}
       </form>
 
-      <div className="text-xs text-slate-500 space-y-1">
+      <div className="text-xs text-slate-500 space-y-1 break-all">
         <p>Core contract: <span className="font-mono">{STX_CONTRACT_ADDRESS}.{STX_CONTRACT_NAME}</span></p>
-        <p>Reserve: 80 STX seeded. Receiver must be whitelisted by admin.</p>
+        <p>Receiver must be whitelisted by admin.</p>
       </div>
     </div>
   );

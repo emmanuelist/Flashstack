@@ -1,16 +1,11 @@
 import { STX_CONTRACT_ADDRESS, STX_CONTRACT_NAME } from "@/lib/stacks/config";
+import { ReceiverApproval } from "@/components/receivers/ReceiverApproval";
 
 const LIVE_STX_RECEIVERS = [
   {
     name: "stx-test-receiver",
     label: "STX Test Receiver",
     description: "Borrow STX, repay principal + fee. Use this to verify flash loans work from your wallet.",
-    address: STX_CONTRACT_ADDRESS,
-  },
-  {
-    name: "bitflow-arb-receiver",
-    label: "Bitflow Arbitrage",
-    description: "STX/stSTX round-trip on Bitflow stableswap. Profitable when stSTX trades above 1 STX after stacking rewards.",
     address: STX_CONTRACT_ADDRESS,
   },
 ];
@@ -28,7 +23,7 @@ export default function ReceiversPage() {
       <div>
         <h1 className="text-2xl font-bold text-white mb-1">Receiver Contracts</h1>
         <p className="text-slate-400 text-sm">
-          Live contracts are deployed and callable on Stacks mainnet today. Templates show what you can build.
+          Receivers deployed on Stacks mainnet, with their live approval status on the core. Templates show what you can build.
         </p>
       </div>
 
@@ -40,7 +35,7 @@ export default function ReceiversPage() {
             Live on Mainnet
           </span>
         </div>
-        <p className="text-slate-500 text-xs mb-4 font-mono">
+        <p className="text-slate-500 text-xs mb-4 font-mono break-all">
           Core: {STX_CONTRACT_ADDRESS}.{STX_CONTRACT_NAME}
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -61,7 +56,10 @@ export default function ReceiversPage() {
                 </svg>
               </div>
               <p className="text-slate-400 text-xs mb-3 leading-relaxed">{r.description}</p>
-              <p className="font-mono text-xs text-slate-600">.{r.name}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-mono text-xs text-slate-600">.{r.name}</p>
+                <ReceiverApproval core="stx" name={r.name} />
+              </div>
             </a>
           ))}
         </div>

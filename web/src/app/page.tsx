@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { fetchStxProtocolStats } from "@/lib/stacks/stx-client";
+import { useReceiverStatus } from "@/lib/hooks/useReceiverStatus";
 
 const DEPLOYER = "SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5";
 
@@ -34,6 +35,10 @@ function useLiveStats() {
 
 export default function LandingPage() {
   const { loans, volume, reserve, maxLoan } = useLiveStats();
+  const stxStatus = useReceiverStatus("stx", "mainnet");
+  const sbtcStatus = useReceiverStatus("sbtc", "mainnet");
+  const loansAvailable = stxStatus.available || sbtcStatus.available;
+  const loansUnavailable = stxStatus.unavailable && sbtcStatus.unavailable;
 
   return (
     <div className="min-h-screen bg-surface text-slate-100 flex flex-col">
@@ -67,8 +72,22 @@ export default function LandingPage() {
 
         <div className="relative max-w-6xl mx-auto px-4 md:px-6 pt-20 pb-24 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-600/10 border border-brand-600/20 text-brand-400 text-xs font-medium mb-6">
-            <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-            Live on Stacks Mainnet
+            {loansAvailable ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                Live on Stacks Mainnet
+              </>
+            ) : loansUnavailable ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                On Stacks Mainnet · Flash loans unavailable right now
+              </>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
+                On Stacks Mainnet
+              </>
+            )}
           </div>
 
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tight mb-6 leading-none">
@@ -107,8 +126,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
             <LiveStat label="Flash Loans" value={loans !== null ? loans.toLocaleString() : "—"} live={loans !== null} />
             <LiveStat label="STX Reserve" value={reserve !== null ? `${reserve} STX` : "—"} live={reserve !== null} />
-            <LiveStat label="Assets" value="STX + sBTC" live />
-            <LiveStat label="Fee Rate" value="0.05%" live />
+            <LiveStat label="Assets" value="STX + sBTC" />
+            <LiveStat label="Fee Rate" value="0.05%" />
           </div>
         </div>
       </section>

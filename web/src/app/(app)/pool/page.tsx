@@ -110,6 +110,18 @@ export default function PoolPage() {
         />
       </div>
 
+      {/* Paused notice. The contract only gates flash-loan on `paused`, so
+          deposits and withdrawals still work; warn rather than block. */}
+      {stats?.paused && (
+        <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <p className="text-sm font-medium text-amber-300">This pool is paused</p>
+          <p className="text-sm text-slate-300 mt-1 leading-relaxed">
+            No flash loans can be taken from it right now, so deposits earn no new yield until it resumes.
+            Withdrawals are unaffected.
+          </p>
+        </div>
+      )}
+
       {/* Your Position */}
       {isWalletConnected && position && position.shares > 0n && (
         <div className="bg-surface-card border border-surface-border rounded-xl p-4">
@@ -163,8 +175,14 @@ export default function PoolPage() {
               {depositAmount && parseFloat(depositAmount) > 0 && (
                 <div className="bg-surface rounded-lg p-3 space-y-1.5 text-xs">
                   <Row label="Deposit" value={`${depositAmount} ${meta.symbol}`} />
-                  <Row label="Fee per flash loan you earn" value={`${fee} ${meta.symbol} (0.05%)`} dim />
-                  <Row label="Your share grows automatically" value="as fees accumulate" dim />
+                  {stats?.paused ? (
+                    <Row label="Yield while paused" value="none" dim />
+                  ) : (
+                    <>
+                      <Row label="Fee per flash loan you earn" value={`${fee} ${meta.symbol} (0.05%)`} dim />
+                      <Row label="Your share grows automatically" value="as fees accumulate" dim />
+                    </>
+                  )}
                 </div>
               )}
 

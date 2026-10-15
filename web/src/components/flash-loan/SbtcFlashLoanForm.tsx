@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useStacks } from "@/lib/hooks/useStacks";
 import { useSbtcFlashLoan } from "@/lib/hooks/useSbtcFlashLoan";
+import { useReceiverStatus } from "@/lib/hooks/useReceiverStatus";
 import {
   SBTC_CONTRACT_ADDRESS,
   SBTC_CONTRACT_NAME,
   SBTC_RECEIVER_CONTRACTS,
 } from "@/lib/stacks/config";
 import { StatCard } from "@/components/dashboard/StatCard";
+import { CoreStatusBadge, ReceiverNotApproved, NoApprovedReceivers } from "./ReceiverStatus";
 
 const FEE_BP = 5; // 0.05%
 const MAX_LOAN_SATS = 10_000_000; // 0.1 BTC (10M sats)
@@ -26,6 +28,7 @@ function formatBtc(sats: number): string {
 export function SbtcFlashLoanForm() {
   const { isWalletConnected, connectWallet } = useStacks();
   const { status, txId, error, executeSbtcFlashLoan, reset } = useSbtcFlashLoan();
+  const { corePaused, approved, unavailable } = useReceiverStatus("sbtc");
 
   const [amount, setAmount] = useState("");
   const [receiver, setReceiver] = useState(SBTC_RECEIVER_CONTRACTS[0].name);
@@ -41,6 +44,7 @@ export function SbtcFlashLoanForm() {
     return (
       <div className="bg-surface-card border border-surface-border rounded-xl p-8 text-center">
         <p className="text-slate-400 mb-4">Connect your wallet to execute sBTC flash loans</p>
+        {unavailable && <NoApprovedReceivers corePaused={corePaused} />}
         <button
           onClick={connectWallet}
           className="px-6 py-2.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
@@ -51,9 +55,11 @@ export function SbtcFlashLoanForm() {
     );
   }
 
+  const receiverRejected = corePaused === true || approved[receiver] === false;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountSats || exceedsMax) return;
+    if (!amountSats || exceedsMax || receiverRejected) return;
     await executeSbtcFlashLoan(String(amountSats), receiver);
   };
 
@@ -61,9 +67,12 @@ export function SbtcFlashLoanForm() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Execute sBTC Flash Loan</h2>
-        <span className="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-1 rounded-full">
-          Canonical sBTC
-        </span>
+        <div className="flex items-center gap-2">
+          <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} />
+          <span className="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-1 rounded-full">
+            Canonical sBTC
+          </span>
+        </div>
       </div>
 
       {/* Info cards */}
@@ -116,13 +125,14 @@ export function SbtcFlashLoanForm() {
           >
             {SBTC_RECEIVER_CONTRACTS.map((r) => (
               <option key={r.name} value={r.name}>
-                {r.label} — {r.description}
+                {r.label}: {r.description}{approved[r.name] === false ? " (not approved)" : ""}
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1 break-all">
             {SBTC_CONTRACT_ADDRESS}.{receiver}
           </p>
+          {receiverRejected && <ReceiverNotApproved corePaused={corePaused} />}
         </div>
 
         {/* Preview */}
@@ -145,7 +155,7 @@ export function SbtcFlashLoanForm() {
 
         <button
           type="submit"
-          disabled={!amountSats || status === "pending" || exceedsMax}
+          disabled={!amountSats || status === "pending" || exceedsMax || receiverRejected}
           className="w-full px-6 py-3 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:bg-slate-700 disabled:text-slate-500 text-white transition-colors"
         >
           {status === "pending" ? "Submitting..." : "Execute sBTC Flash Loan"}
@@ -174,7 +184,7 @@ export function SbtcFlashLoanForm() {
         )}
       </form>
 
-      <div className="text-xs text-slate-500 space-y-1">
+      <div className="text-xs text-slate-500 space-y-1 break-all">
         <p>
           Core: <span className="font-mono">{SBTC_CONTRACT_ADDRESS}.{SBTC_CONTRACT_NAME}</span>
         </p>
