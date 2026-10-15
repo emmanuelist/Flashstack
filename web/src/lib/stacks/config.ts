@@ -58,7 +58,6 @@ export type PoolAsset = keyof typeof LP_POOLS;
 
 export const STX_RECEIVER_CONTRACTS = [
   { name: "stx-test-receiver", label: "STX Test Receiver", description: "Borrow STX, repay principal + fee", address: STX_CONTRACT_ADDRESS },
-  { name: "bitflow-arb-receiver", label: "Bitflow Arbitrage", description: "STX/stSTX round-trip on Bitflow stableswap", address: STX_CONTRACT_ADDRESS },
 ];
 
 export const SBTC_RECEIVER_CONTRACTS = [
