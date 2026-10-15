@@ -40,7 +40,7 @@ export default function ReceiversPage() {
             Live on Mainnet
           </span>
         </div>
-        <p className="text-slate-500 text-xs mb-4 font-mono">
+        <p className="text-slate-500 text-xs mb-4 font-mono break-all">
           Core: {STX_CONTRACT_ADDRESS}.{STX_CONTRACT_NAME}
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -120,7 +120,7 @@ export function SbtcFlashLoanForm() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 mt-1 break-all">
             {SBTC_CONTRACT_ADDRESS}.{receiver}
           </p>
         </div>
@@ -174,7 +174,7 @@ export function SbtcFlashLoanForm() {
         )}
       </form>
 
-      <div className="text-xs text-slate-500 space-y-1">
+      <div className="text-xs text-slate-500 space-y-1 break-all">
         <p>
           Core: <span className="font-mono">{SBTC_CONTRACT_ADDRESS}.{SBTC_CONTRACT_NAME}</span>
         </p>

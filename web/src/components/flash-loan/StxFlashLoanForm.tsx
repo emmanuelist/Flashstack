@@ -104,7 +104,7 @@ export function StxFlashLoanForm() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">{STX_CONTRACT_ADDRESS}.{receiver}</p>
+          <p className="text-xs text-slate-500 mt-1 break-all">{STX_CONTRACT_ADDRESS}.{receiver}</p>
         </div>
 
         {/* Preview */}
@@ -156,7 +156,7 @@ export function StxFlashLoanForm() {
         )}
       </form>
 
-      <div className="text-xs text-slate-500 space-y-1">
+      <div className="text-xs text-slate-500 space-y-1 break-all">
         <p>Core contract: <span className="font-mono">{STX_CONTRACT_ADDRESS}.{STX_CONTRACT_NAME}</span></p>
         <p>Reserve: 80 STX seeded. Receiver must be whitelisted by admin.</p>
       </div>
