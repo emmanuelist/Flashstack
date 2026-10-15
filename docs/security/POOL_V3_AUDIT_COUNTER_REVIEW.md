@@ -20,7 +20,7 @@ affects live funds.
   with more than ~8 decimals, at small balances. LPs then can't withdraw a whole position, new deposits
   abort, and `get-lp-value` aborts. `add-asset` accepts up to 24 decimals. The F2 fix (share-scale =
   10^decimals) is what made the products this large. Not reachable with the assets planned so far
-  (sBTC, 8 decimals; USDCx, 6).
+  (sBTC, 8 decimals; USDCx, 6). **Fixed 2026-10-15:** `MAX-DECIMALS` lowered from `u24` to `u8` (Matt's go).
 - **New: CR-2 (Low).** The receiver allowlist is global, not per asset. A stranger can name any
   approved receiver in any listed asset, and a receiver that pays the fee from its own buffer bleeds that
   buffer to LPs.
@@ -48,6 +48,12 @@ affects live funds.
 ## 2. New findings
 
 ### CR-1 — Medium — share math overflows for high-decimal assets (`flashstack-pool-v3`)
+
+**Status: FIXED 2026-10-15.** `MAX-DECIMALS` is now `u8` in both copies of the contract. `add-asset` returns
+`ERR-DECIMALS-TOO-LARGE` (u817) for 9, 12, 18 and 24 decimals, and an 8-decimal asset still lists and
+round-trips 1,000,000 whole tokens (`tests/pool-v3-counter-review.test.ts`, CR-1 block). The proof tests
+below were written against the old `u24` cap and have been replaced by those rejection tests. The
+pool-v3 instance staged on testnet by #112 predates this change and still accepts up to 24 decimals.
 
 **Where:** `deposit` `:274`, `withdraw` `:326`, `get-lp-value` `:472`; `MAX-DECIMALS u24` at `:95`;
 `share-scale = 10^decimals` at `:202`.
@@ -179,8 +185,9 @@ no longer has the line.
 
 ## 4. Open questions for Matt
 
-1. Which assets will pool-v3 list at launch? If only sBTC and USDCx, is `MAX-DECIMALS u8` (CR-1) OK as
-   a code change before the audit, rather than a listing-policy note?
+1. ~~Which assets will pool-v3 list at launch? If only sBTC and USDCx, is `MAX-DECIMALS u8` (CR-1) OK as
+   a code change before the audit, rather than a listing-policy note?~~ Answered 2026-10-15: only sBTC and
+   USDCx, so yes. Fixed in code.
 2. CR-2: per-asset receiver approval in the contract, or the armed-loan requirement in the checklist?
 3. Is pool-v3's `get-share-price` intended as a collateral oracle (`vwh.5`)? If so, CR-3 belongs in the
    integration spec.

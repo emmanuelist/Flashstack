@@ -4,11 +4,12 @@ import { Cl } from "@stacks/transactions";
 /**
  * Counter-review of docs/security/CLARITY_AUDIT_CORE_AND_V3_POOLS.md:
  * findings that audit and the earlier pool-v3 reviews did not cover. Each
- * test pins CURRENT behaviour, so it should be flipped when the fix lands.
+ * test pins CURRENT behaviour, so it should be flipped when the fix lands
+ * (CR-1 has been flipped: MAX-DECIMALS is now u8).
  * See docs/security/POOL_V3_AUDIT_COUNTER_REVIEW.md.
  *
  * CR-1: share math overflows uint128 for high-decimal assets.
- *   share-scale = 10^decimals (F2), and add-asset accepts up to 24 decimals.
+ *   share-scale = 10^decimals (F2), and add-asset accepted up to 24 decimals.
  *   The first LP gets shares ~= amount * 10^d, so withdraw computes
  *   shares * (balance + 1) ~= a^2 * 10^d. That exceeds 2^128 (~3.4e38) once
  *   a > sqrt(3.4e38 / 10^d): ~1.8e15 base units at 8 decimals (fine for
@@ -30,8 +31,6 @@ const POOL = "flashstack-pool-v3";
 const SBTC = "sbtc-token"; // 8 decimals, deployer can mint
 const USDC = "mock-usdcx"; // 6 decimals, freely mintable
 const GOOD_RX = "test-pool-v3-receiver-good"; // repays amount + fee from its own balance
-
-const OVERFLOW = /Arithmetic|overflow/i;
 
 const tokenSource = (decimals: number) => `(impl-trait .sip-010-trait-ft-standard.sip-010-trait)
 (define-fungible-token t)
@@ -80,41 +79,18 @@ describe("pool-v3 counter-review", () => {
     stranger = a.get("wallet_3")!;
   });
 
-  describe("CR-1: share math overflows for high-decimal assets", () => {
-    it("add-asset accepts an 18-decimal token (MAX-DECIMALS is u24)", () => {
-      expect(listToken("tok18", 18).result).toBeOk(Cl.bool(true));
-      const cfg = simnet.callReadOnlyFn(POOL, "get-asset", [Cl.principal(`${deployer}.tok18`)], deployer).result as any;
-      expect(BigInt(cfg.value.value["share-scale"].value)).toBe(10n ** 18n);
-    });
+  describe("CR-1: share math overflows for high-decimal assets (fixed: MAX-DECIMALS u8)", () => {
+    // Before the fix MAX-DECIMALS was u24: an 18-decimal LP holding 1e-7 of a
+    // token could not withdraw, and 12 decimals failed at 100 tokens. Now
+    // add-asset refuses anything above 8 decimals, so those pools never exist.
+    for (const d of [9, 12, 18, 24]) {
+      it(`add-asset rejects a ${d}-decimal token with ERR-DECIMALS-TOO-LARGE`, () => {
+        expect(listToken(`tok${d}`, d).result).toBeErr(Cl.uint(817));
+      });
+    }
 
-    it("18 decimals: an LP holding 1e-7 of a token cannot withdraw its position; new deposits and get-lp-value abort", () => {
-      listToken("tok18", 18);
-      const a = 100_000_000_000n; // 1e11 base units = 0.0000001 token
-      mint("tok18", a * 10n, lp1);
-      mint("tok18", a, lp2);
-      expect(deposit("tok18", a, lp1).result).toBeOk(Cl.uint(a * 10n ** 18n));
-
-      const s = sharesOf("tok18", lp1);
-      expect(() => withdraw("tok18", s, lp1)).toThrow(OVERFLOW);
-      expect(() => deposit("tok18", a / 10n, lp2)).toThrow(OVERFLOW);
-      expect(() =>
-        simnet.callReadOnlyFn(POOL, "get-lp-value", [Cl.principal(`${deployer}.tok18`), Cl.principal(lp1)], deployer),
-      ).toThrow(OVERFLOW);
-
-      // Exit is only possible in small chunks: ~3.4e9 base units per call here.
-      expect(withdraw("tok18", s / 100n, lp1).result).toBeOk(Cl.uint(a / 100n));
-    });
-
-    it("12 decimals: the same failure at 100 whole tokens", () => {
-      listToken("tok12", 12);
-      const a = 100n * 10n ** 12n; // 100 tokens
-      mint("tok12", a, lp1);
-      expect(deposit("tok12", a, lp1).result).toBeOk(Cl.uint(a * 10n ** 12n));
-      expect(() => withdraw("tok12", sharesOf("tok12", lp1), lp1)).toThrow(OVERFLOW);
-    });
-
-    it("8 decimals (sBTC-shaped) stays safe at 1,000,000 whole tokens", () => {
-      listToken("tok8", 8);
+    it("8 decimals (sBTC-shaped) lists and stays safe at 1,000,000 whole tokens", () => {
+      expect(listToken("tok8", 8).result).toBeOk(Cl.bool(true));
       const a = 1_000_000n * 10n ** 8n; // 1e14 base units
       mint("tok8", a, lp1);
       expect(deposit("tok8", a, lp1).result).toBeOk(Cl.uint(a * 10n ** 8n));
