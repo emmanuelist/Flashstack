@@ -27,8 +27,8 @@ All active contracts are under deployer wallet `SP20XD46NGAX05ZQZDKFYCCX49A3852B
 |----------|------|----------|
 | `flashstack-stx-core` | Flash loan engine — holds reserve, executes loans | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core?chain=mainnet) |
 | `flashstack-stx-pool` | LP pool — anyone deposits STX, earns fees | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-pool?chain=mainnet) |
-| `stx-test-receiver` | Basic receiver — borrows and repays, no strategy | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver?chain=mainnet) |
-| `bitflow-arb-receiver-v4` | DEX receiver — STX→stSTX→STX arb on Bitflow | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) |
+| `stx-test-receiver` | **De-approved (F-10)** — no `contract-caller` check; a loan naming it now returns `(err u306)` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.stx-test-receiver?chain=mainnet) |
+| `bitflow-arb-receiver-v4` | **De-approved (F-10)** — no `contract-caller` check; a loan naming it now returns `(err u306)` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) |
 
 ---
 
@@ -37,7 +37,7 @@ All active contracts are under deployer wallet `SP20XD46NGAX05ZQZDKFYCCX49A3852B
 - **There is no testnet deployment.** All STX contract testing hits Stacks mainnet.
 - The frontend at [flashstack.vercel.app](https://flashstack.vercel.app) is connected to mainnet. Flash loans are atomic — if the receiver fails to repay, the entire tx reverts and you lose only the Stacks tx fee (~0.001 STX, ~$0.001). No other funds are at risk.
 - Do **not** run arbitrage scenarios via the UI without checking with Matt first — if the Bitflow spread is zero, the tx will revert cleanly but wastes gas.
-- The `bitflow-arb-receiver-v4` is whitelisted in `flashstack-stx-core`. Any new receiver contract you deploy must be approved via `add-approved-receiver` (admin-only) before it can borrow.
+- `stx-test-receiver` and `bitflow-arb-receiver-v4` were de-approved on `flashstack-stx-core` under F-10 (`docs/security/FINDINGS_REGISTER.md`), so Tests 1 and 4 below are not runnable as written. Any new receiver contract you deploy must be approved via `add-approved-receiver` (admin-only) before it can borrow.
 
 ---
 
@@ -59,6 +59,8 @@ No local environment setup is needed for mainnet testing.
 ## Test Suite
 
 ### Test 1 — Basic Flash Loan (Smoke Test)
+
+> **Not runnable as written:** `stx-test-receiver` is de-approved (F-10), so this returns `(err u306)`. Use your own receiver, vetted with `docs/security/RECEIVER_VETTING.md`, once it's approved.
 
 **What it tests:** Core flash loan mechanic — borrow STX, repay in same tx.  
 **Contract:** `flashstack-stx-core`  
@@ -101,8 +103,8 @@ Call `get-reserve-balance` on `flashstack-stx-core`. The result must be ≥ your
 | `get-fee-basis-points` | `(ok u5)` — 0.05% fee |
 | `get-max-single-loan` | `(ok u500000000000)` — 500,000 STX limit |
 | `get-admin` | `(ok SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5)` |
-| `is-approved-receiver` with `SP20XD46...stx-test-receiver` | `true` (STX core returns a bare bool, not `(ok ...)`) |
-| `is-approved-receiver` with `SP20XD46...bitflow-arb-receiver-v4` | `true` |
+| `is-approved-receiver` with `SP20XD46...stx-test-receiver` | `false` — de-approved under F-10 (STX core returns a bare bool, not `(ok ...)`) |
+| `is-approved-receiver` with `SP20XD46...bitflow-arb-receiver-v4` | `false` — de-approved under F-10 |
 | `calculate-fee u10000000` | `(ok u5000)` — fee on 10 STX |
 
 ---
@@ -128,6 +130,8 @@ amount: u1000000   (1 STX)
 ---
 
 ### Test 4 — Bitflow DEX Receiver (Live DEX Integration)
+
+> **Not runnable as written:** `bitflow-arb-receiver-v4` is de-approved (F-10). Its hardened rewrite, `contracts/bitflow-arb-receiver-v5.clar`, is not yet deployed.
 
 **What it tests:** Flash loan → Bitflow STX/stSTX swap → repayment in one tx.  
 **Contract:** `flashstack-stx-core`  
@@ -178,8 +182,8 @@ These should all fail cleanly with no fund loss:
 
 | Receiver | In scope | Notes |
 |----------|----------|-------|
-| `stx-test-receiver` | Yes — start here | Safe, always repays |
-| `bitflow-arb-receiver-v4` | Yes — main DEX test | Check `estimate-profit` first |
+| `stx-test-receiver` | No — de-approved (F-10) | Returns `(err u306)` |
+| `bitflow-arb-receiver-v4` | No — de-approved (F-10) | Hardened rewrite `bitflow-arb-receiver-v5` not yet deployed |
 | `arkadiko-liquidation-receiver` | Optional | Requires an undercollateralised Arkadiko vault |
 | All sBTC receivers (`SP3TGRVG7...`) | No | Legacy — do not test |
 

@@ -326,7 +326,7 @@ Deployed at: `SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait
 
 Your STX receiver must:
 1. Declare `(impl-trait 'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)`
-2. Define `(define-public (execute-stx-flash (amount uint) (core principal)) ...)`
+2. Define `(define-public (execute-stx-flash (amount uint) (core principal)) ...)`, asserting `(is-eq contract-caller <hardcoded core>)` as its first expression, before any read of the core (including the fee lookup), and never trusting the `core` argument (F-10, `docs/security/RECEIVER_VETTING.md`)
 3. By the time `execute-stx-flash` returns, `stx-get-balance(as-contract tx-sender) ≥ amount + fee` must be true — or the caller `flash-loan` will fail its reserve check and revert the entire transaction
 
 ### sbtc-flash-receiver-trait
@@ -346,7 +346,8 @@ Deployed at: `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trai
 Your sBTC receiver must:
 1. Declare `(impl-trait 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait.sbtc-flash-receiver-trait)`
 2. Define `(define-public (execute-sbtc-flash (amount uint) (core principal)) ...)`
-3. Repay using `(contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token transfer total-owed tx-sender core none)` wrapped in `as-contract`
+3. Assert `(is-eq contract-caller <hardcoded core>)` as the first expression, before any read of the core including the fee lookup (F-10, `docs/security/RECEIVER_VETTING.md`)
+4. Repay to the hardcoded core, not the `core` argument: `(contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token transfer total-owed tx-sender CORE none)` wrapped in `as-contract`
 
 ---
 

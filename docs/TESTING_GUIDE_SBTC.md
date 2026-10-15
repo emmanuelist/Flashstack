@@ -27,7 +27,7 @@ All contracts are under deployer `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5`.
 |----------|------|----------|
 | `flashstack-sbtc-core` | sBTC flash loan engine — holds reserve, executes loans | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core?chain=mainnet) |
 | `sbtc-flash-receiver-trait` | Interface all sBTC receivers must implement | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-flash-receiver-trait?chain=mainnet) |
-| `sbtc-test-receiver` | Basic receiver — borrows canonical sBTC and repays, no strategy | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver?chain=mainnet) |
+| `sbtc-test-receiver` | **De-approved (F-10)** — no `contract-caller` check; a loan naming it now returns `(err u306)` | [View](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.sbtc-test-receiver?chain=mainnet) |
 
 **Canonical sBTC token:** `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token`
 
@@ -46,6 +46,8 @@ All contracts are under deployer `SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5`.
 ## Test Suite
 
 ### Test 1 — Basic sBTC Flash Loan (Smoke Test)
+
+> **Not runnable as written.** `sbtc-test-receiver` was de-approved on `flashstack-sbtc-core` under F-10 (`docs/security/FINDINGS_REGISTER.md`), so the steps below now return `(err u306)`. Use your own receiver, built from the template below and vetted with `docs/security/RECEIVER_VETTING.md`, once it's approved.
 
 **What it tests:** Core sBTC flash loan mechanic — borrow canonical sBTC, repay in same tx.
 
@@ -101,7 +103,7 @@ Go to the [flashstack-sbtc-core explorer page](https://explorer.hiro.so/address/
 | `get-fee-basis-points` | `(ok u5)` — 0.05% fee |
 | `get-max-single-loan` | `(ok u10000000)` — 0.1 BTC |
 | `get-admin` | `(ok SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5)` |
-| `is-approved-receiver` → `SP20XD46...sbtc-test-receiver` | `(ok true)` |
+| `is-approved-receiver` → `SP20XD46...sbtc-test-receiver` | `(ok false)` — de-approved under F-10 |
 | `calculate-fee u10000` | `(ok u1)` — minimum 1 sat fee |
 | `calculate-fee u1000000` | `(ok u50)` — 0.05% of 1M sats |
 | `get-stats` | tuple with total-loans, total-volume, total-fees-collected |
@@ -144,33 +146,39 @@ Any Clarity contract that implements the `sbtc-flash-receiver-trait` can borrow 
 (define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core)
 
 (define-constant ERR-REPAY-FAILED (err u500))
+(define-constant ERR-NOT-CORE (err u403))
 
 ;; Called by flashstack-sbtc-core after transferring sBTC to this contract.
 ;; sBTC is already in this contract when this function runs.
 ;; You MUST repay amount + fee before this function returns.
 (define-public (execute-sbtc-flash (amount uint) (core principal))
-  (let (
-    ;; Get current fee rate from core
-    (fee-bp  (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY-FAILED))
-    (raw-fee (/ (* amount fee-bp) u10000))
-    (fee     (if (> raw-fee u0) raw-fee u1))  ;; minimum 1 sat
-    (owed    (+ amount fee))
-  )
-    ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
-    ;; e.g. swap sBTC for USDA on Velar, arbitrage, liquidate
-    ;; The sBTC loan is already in this contract.
-    ;; ─────────────────────────────────────────────────────────
+  (begin
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) ERR-NOT-CORE)
+    (let (
+      ;; Get current fee rate from core
+      (fee-bp  (unwrap! (contract-call? CORE get-fee-basis-points) ERR-REPAY-FAILED))
+      (raw-fee (/ (* amount fee-bp) u10000))
+      (fee     (if (> raw-fee u0) raw-fee u1))  ;; minimum 1 sat
+      (owed    (+ amount fee))
+    )
+      ;; ── YOUR STRATEGY GOES HERE ──────────────────────────────
+      ;; e.g. swap sBTC for USDA on Velar, arbitrage, liquidate
+      ;; The sBTC loan is already in this contract.
+      ;; ─────────────────────────────────────────────────────────
 
-    ;; Repay principal + fee to core
-    (unwrap!
-      (as-contract (contract-call? SBTC transfer owed tx-sender core none))
-      ERR-REPAY-FAILED)
-    (ok true)
+      ;; Repay principal + fee to core
+      (unwrap!
+        (as-contract (contract-call? SBTC transfer owed tx-sender CORE none))
+        ERR-REPAY-FAILED)
+      (ok true)
+    )
   )
 )
 ```
 
 **Key points:**
+- Assert `contract-caller` is the core as the first expression, before the fee lookup, and repay to the `CORE` constant, never the `core` argument (F-10, `docs/security/RECEIVER_VETTING.md`)
 - Use `as-contract` when calling `transfer` — the contract is the sender, not tx-sender
 - The fee is minimum 1 sat regardless of amount
 - Pre-fund your receiver with enough sBTC to cover the fee if your strategy doesn't generate surplus

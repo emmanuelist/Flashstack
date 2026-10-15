@@ -47,11 +47,11 @@ Fee: **0.05%** per loan. Assets: **STX** and **canonical sBTC** (`SM3VDXK3WZZSA8
 |----------|-------------|
 | [`flashstack-stx-core`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core?chain=mainnet) | STX flash-loan engine (reserve model) |
 | [`flashstack-sbtc-core`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-sbtc-core?chain=mainnet) | Canonical sBTC flash-loan engine |
-| [`bitflow-arb-receiver-v4`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) | Bitflow STX/stSTX arbitrage |
+| [`bitflow-arb-receiver-v4`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.bitflow-arb-receiver-v4?chain=mainnet) | Bitflow STX/stSTX arbitrage — **de-approved (F-10)**: no `contract-caller` check. Hardened rewrite: [`bitflow-arb-receiver-v5`](contracts/bitflow-arb-receiver-v5.clar), **not yet deployed** |
 | [`velar-sbtc-arb-receiver`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.velar-sbtc-arb-receiver?chain=mainnet) | Velar wSTX↔sBTC arbitrage — **non-functional, de-approved**: hardcodes Velar pool `u70`, which is not an sBTC/STX pool |
 | [`zest-v2-liquidation-receiver`](contracts/zest-v2-liquidation-receiver.clar) | Zero-capital Zest liquidator, v0-8-market (5 modes) — **not yet deployed** |
-| [`alex-arb-receiver-v2`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.alex-arb-receiver-v2?chain=mainnet) | ALEX STX/ALEX arbitrage |
-| `stx-test-receiver` / `sbtc-test-receiver` | Minimal borrow-and-repay receivers |
+| [`alex-arb-receiver-v2`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.alex-arb-receiver-v2?chain=mainnet) | ALEX STX/ALEX arbitrage — **de-approved (F-10)**: no `contract-caller` check. Approved successor: [`alex-arb-receiver-v5`](https://explorer.hiro.so/address/SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.alex-arb-receiver-v5?chain=mainnet) |
+| `stx-test-receiver` / `sbtc-test-receiver` | Minimal borrow-and-repay receivers — **de-approved (F-10)**: no `contract-caller` check. A loan naming either returns `(err u306)` |
 
 **Hardened LP pools & oracle (v2)** — `SPR9PQANV6XHSDNRAX2GNKCA5Z1KH61961KE0BYG`
 
@@ -104,19 +104,25 @@ Any Clarity contract implementing the receiver trait can borrow. New to Clarity?
 ```clarity
 (impl-trait 'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 
+(define-constant CORE 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
+
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let (
-    (fee-bp     (unwrap! (contract-call? 'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core get-fee-basis-points) (err u500)))
-    (fee        (let ((raw (/ (* amount fee-bp) u10000))) (if (> raw u0) raw u1)))
-  )
-    ;; ...your strategy here — `amount` STX is already in this contract...
-    (unwrap! (as-contract (stx-transfer? (+ amount fee) tx-sender core)) (err u500))
-    (ok true)
+  (begin
+    ;; Only the real core may call this, and repayment goes to it, never to `core` (F-10)
+    (asserts! (is-eq contract-caller CORE) (err u403))
+    (let (
+      (fee-bp     (unwrap! (contract-call? CORE get-fee-basis-points) (err u500)))
+      (fee        (let ((raw (/ (* amount fee-bp) u10000))) (if (> raw u0) raw u1)))
+    )
+      ;; ...your strategy here — `amount` STX is already in this contract...
+      (unwrap! (as-contract (stx-transfer? (+ amount fee) tx-sender CORE)) (err u500))
+      (ok true)
+    )
   )
 )
 ```
 
-Deploy to mainnet, then open a [GitHub issue](https://github.com/mattglory/Flashstack/issues) with your contract address to get whitelisted. Full templates: [BUILD_A_RECEIVER.md](docs/BUILD_A_RECEIVER.md) · [TESTING_GUIDE_STX.md](docs/TESTING_GUIDE_STX.md) · [TESTING_GUIDE_SBTC.md](docs/TESTING_GUIDE_SBTC.md).
+Before asking for approval, run [docs/security/RECEIVER_VETTING.md](docs/security/RECEIVER_VETTING.md). Deploy to mainnet, then open a [GitHub issue](https://github.com/mattglory/Flashstack/issues) with your contract address to get whitelisted. Full templates: [BUILD_A_RECEIVER.md](docs/BUILD_A_RECEIVER.md) · [TESTING_GUIDE_STX.md](docs/TESTING_GUIDE_STX.md) · [TESTING_GUIDE_SBTC.md](docs/TESTING_GUIDE_SBTC.md).
 
 ---
 
