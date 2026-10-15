@@ -1,8 +1,10 @@
 import {
   fetchCallReadOnlyFunction,
   cvToJSON,
+  cvToHex,
   standardPrincipalCV,
 } from "@stacks/transactions";
+import { cachedRead } from "./read-cache";
 import { LP_POOLS, PoolAsset, getNetwork, NetworkType } from "./config";
 import type { PoolStats, PoolUserPosition } from "./types";
 
@@ -13,14 +15,15 @@ async function callReadOnly(
   network: NetworkType
 ) {
   const pool = LP_POOLS[asset];
-  const result = await fetchCallReadOnlyFunction({
+  const key = `${network}:${pool.address}.${pool.name}:${functionName}:${functionArgs.map((a) => cvToHex(a)).join(",")}`;
+  const result = await cachedRead(key, () => fetchCallReadOnlyFunction({
     contractAddress: pool.address,
     contractName: pool.name,
     functionName,
     functionArgs,
     network: getNetwork(network),
     senderAddress: pool.address,
-  });
+  }));
   return cvToJSON(result);
 }
 

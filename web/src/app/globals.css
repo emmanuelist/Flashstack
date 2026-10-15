@@ -19,7 +19,6 @@
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, sans-serif;
 }
 
 @layer utilities {

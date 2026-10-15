@@ -28,7 +28,7 @@ function formatBtc(sats: number): string {
 export function SbtcFlashLoanForm() {
   const { isWalletConnected, connectWallet } = useStacks();
   const { status, txId, error, executeSbtcFlashLoan, reset } = useSbtcFlashLoan();
-  const { corePaused, approved, unavailable } = useReceiverStatus("sbtc");
+  const { corePaused, approved, unavailable, failed } = useReceiverStatus("sbtc");
 
   const [amount, setAmount] = useState("");
   const [receiver, setReceiver] = useState(SBTC_RECEIVER_CONTRACTS[0].name);
@@ -68,7 +68,7 @@ export function SbtcFlashLoanForm() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Execute sBTC Flash Loan</h2>
         <div className="flex items-center gap-2">
-          <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} />
+          <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} failed={failed} />
           <span className="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-1 rounded-full">
             Canonical sBTC
           </span>

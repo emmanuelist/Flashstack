@@ -1,5 +1,5 @@
 import { STX_CONTRACT_ADDRESS, STX_CONTRACT_NAME } from "@/lib/stacks/config";
-import { ReceiverApproval } from "@/components/receivers/ReceiverApproval";
+import { ReceiverApproval, CoreState } from "@/components/receivers/ReceiverApproval";
 
 const LIVE_STX_RECEIVERS = [
   {
@@ -31,9 +31,7 @@ export default function ReceiversPage() {
       <div>
         <div className="flex items-center gap-3 mb-2">
           <h2 className="text-white font-semibold">STX Flash Loans</h2>
-          <span className="text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full">
-            Live on Mainnet
-          </span>
+          <CoreState />
         </div>
         <p className="text-slate-500 text-xs mb-4 font-mono break-all">
           Core: {STX_CONTRACT_ADDRESS}.{STX_CONTRACT_NAME}

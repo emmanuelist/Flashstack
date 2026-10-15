@@ -7,6 +7,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-archivo)", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["var(--font-martian)", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+      },
       colors: {
         // Bitcoin orange (#F7931A)
         brand: {
@@ -26,6 +30,20 @@ const config: Config = {
           card: "#151109",
           hover: "#1d1710",
           border: "#2a2016",
+        },
+        // State tokens named after the mechanic: a flash loan is a circuit
+        // that has to close inside one transaction.
+        //   trace   : the loan's path (copper; same hue as brand-500)
+        //   current : value moving right now
+        //   closed  : loop completed: repaid / live
+        //   open    : loop broken: reverted / no usable path
+        //   tripped : breaker thrown: paused
+        circuit: {
+          trace: "#f7931a",
+          current: "#ffc685",
+          closed: "#86dba9",
+          open: "#ff6b57",
+          tripped: "#f2c94c",
         },
       },
     },

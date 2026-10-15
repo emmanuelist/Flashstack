@@ -27,30 +27,32 @@ export function useReceiverStatus(core: FlashCore, fixedNetwork?: NetworkType) {
     key: string;
     corePaused: boolean | null;
     approved: Record<string, boolean | null>;
-  }>({ key, corePaused: null, approved: {} });
+    failed: boolean;
+  }>({ key, corePaused: null, approved: {}, failed: false });
 
   useEffect(() => {
     let cancelled = false;
-    const merge = (patch: { corePaused?: boolean; approved?: Record<string, boolean> }) => {
+    const merge = (patch: { corePaused?: boolean; approved?: Record<string, boolean>; failed?: true }) => {
       if (cancelled) return;
       setResult((prev) => {
-        const base = prev.key === key ? prev : { key, corePaused: null, approved: {} };
+        const base = prev.key === key ? prev : { key, corePaused: null, approved: {}, failed: false };
         return {
           key,
           corePaused: patch.corePaused ?? base.corePaused,
           approved: { ...base.approved, ...patch.approved },
+          failed: patch.failed ?? base.failed,
         };
       });
     };
 
     fetchCorePaused(core, network)
       .then((p) => merge({ corePaused: p }))
-      .catch(() => { /* leave unknown */ });
+      .catch(() => merge({ failed: true }));
 
     for (const r of RECEIVERS[core]) {
       fetchReceiverApproved(core, r, network)
         .then((ok) => merge({ approved: { [r.name]: ok } }))
-        .catch(() => { /* leave unknown */ });
+        .catch(() => merge({ failed: true }));
     }
 
     return () => { cancelled = true; };
@@ -58,6 +60,8 @@ export function useReceiverStatus(core: FlashCore, fixedNetwork?: NetworkType) {
 
   const corePaused = result.key === key ? result.corePaused : null;
   const approved = result.key === key ? result.approved : {};
+  // A read failed, so some values may stay unknown (e.g. rate limited)
+  const failed = result.key === key && result.failed;
 
   const statuses = RECEIVERS[core].map((r) => approved[r.name] ?? null);
   // true once every listed receiver is known to be unapproved, or the core is paused
@@ -65,5 +69,5 @@ export function useReceiverStatus(core: FlashCore, fixedNetwork?: NetworkType) {
   // true once the core is known active and at least one receiver is known approved
   const available = corePaused === false && statuses.some((s) => s === true);
 
-  return { corePaused, approved, available, unavailable };
+  return { corePaused, approved, available, unavailable, failed };
 }

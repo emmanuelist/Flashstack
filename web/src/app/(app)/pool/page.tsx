@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePool } from "@/lib/hooks/usePool";
 import { useStacks } from "@/lib/hooks/useStacks";
 import { LP_POOLS, PoolAsset } from "@/lib/stacks/config";
+import { StateMark } from "@/components/ui/StateMark";
 
 function fmt(base: bigint, decimals: number) {
   return (Number(base) / 10 ** decimals).toLocaleString(undefined, {
@@ -113,8 +114,8 @@ export default function PoolPage() {
       {/* Paused notice. The contract only gates flash-loan on `paused`, so
           deposits and withdrawals still work; warn rather than block. */}
       {stats?.paused && (
-        <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-          <p className="text-sm font-medium text-amber-300">This pool is paused</p>
+        <div role="status" className="rounded-xl border border-circuit-tripped/30 bg-circuit-tripped/[0.06] p-4">
+          <StateMark state="tripped">This pool is paused</StateMark>
           <p className="text-sm text-slate-300 mt-1 leading-relaxed">
             No flash loans can be taken from it right now, so deposits earn no new yield until it resumes.
             Withdrawals are unaffected.

@@ -19,7 +19,7 @@ export function StxFlashLoanForm() {
   const { isWalletConnected, connectWallet } = useStacks();
   const { status, txId, error, executeStxFlashLoan, reset } = useStxFlashLoan();
   const { stats } = useProtocolStats();
-  const { corePaused, approved, unavailable } = useReceiverStatus("stx");
+  const { corePaused, approved, unavailable, failed } = useReceiverStatus("stx");
 
   const [amount, setAmount] = useState("");
   const [receiver, setReceiver] = useState(STX_RECEIVER_CONTRACTS[0].name);
@@ -61,7 +61,7 @@ export function StxFlashLoanForm() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Execute STX Flash Loan</h2>
-        <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} />
+        <CoreStatusBadge corePaused={corePaused} unavailable={unavailable} failed={failed} />
       </div>
 
       {/* Info cards */}

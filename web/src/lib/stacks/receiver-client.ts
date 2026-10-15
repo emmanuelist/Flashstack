@@ -1,8 +1,10 @@
 import {
   fetchCallReadOnlyFunction,
   cvToJSON,
+  cvToHex,
   contractPrincipalCV,
 } from "@stacks/transactions";
+import { cachedRead } from "./read-cache";
 import {
   STX_CONTRACT_ADDRESS,
   STX_CONTRACT_NAME,
@@ -26,14 +28,15 @@ async function callReadOnly(
   network: NetworkType
 ) {
   const { address, name } = CORES[core];
-  const result = await fetchCallReadOnlyFunction({
+  const key = `${network}:${address}.${name}:${functionName}:${functionArgs.map((a) => cvToHex(a)).join(",")}`;
+  const result = await cachedRead(key, () => fetchCallReadOnlyFunction({
     contractAddress: address,
     contractName: name,
     functionName,
     functionArgs,
     network: getNetwork(network),
     senderAddress: address,
-  });
+  }));
   return cvToJSON(result);
 }
 
