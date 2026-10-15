@@ -157,6 +157,7 @@ deployments/testnet-*.yaml
 !deployments/testnet-plan.yaml
 !deployments/testnet-current-gen-plan.yaml
 !deployments/testnet-pool-v3-plan.yaml
+!deployments/testnet-v3-pools-plan.yaml
 
 # ============================================
 # Frontend (web/)
