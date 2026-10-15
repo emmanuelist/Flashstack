@@ -85,7 +85,10 @@ describe("testnet localizer", () => {
 
   describe("sBTC is remapped to its verified testnet deployment, not to us and not to a mock", () => {
     const SBTC_MAINNET = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4";
-    const SBTC_TESTNET = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    // Read off TESTNET_EQUIVALENT, not re-hardcoded -- this is exactly the
+    // kind of second copy that drifted silently when the mapping was
+    // corrected 2026-10-14 (ST1PQHQ… -> SN3VMHXEN…).
+    const SBTC_TESTNET = TESTNET_EQUIVALENT[SBTC_MAINNET].testnet;
 
     for (const file of ["flashstack-sbtc-core-v2.clar", "flashstack-sbtc-pool-v3.clar"]) {
       it(`${file}: sBTC points at the testnet deployment, NOT at the deployer`, () => {
