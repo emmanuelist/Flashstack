@@ -22,8 +22,8 @@ A near-complete reference already exists on mainnet: `velar-sbtc-arb-receiver` p
 | `SP20XD46….flashstack-sbtc-core` | ✅ | reserve **15,010 sats**, `total-loans u2`, `total-volume u20000`, fee **5 bps**, max-loan **10,000,000 sats (0.1 BTC)**, paused **false** |
 | `SP20XD46….flashstack-sbtc-pool` | ✅ | LP pool; also exposes a flash-loan + collateral oracle |
 | `SP20XD46….sbtc-flash-receiver-trait` | ✅ | the interface |
-| `SP20XD46….sbtc-test-receiver` | ✅ | whitelisted |
-| `SP20XD46….velar-sbtc-arb-receiver` | ✅ | whitelisted |
+| `SP20XD46….sbtc-test-receiver` | ✅ | whitelisted at review time; de-approved 2026-10 under F-10 (`docs/security/FINDINGS_REGISTER.md`) |
+| `SP20XD46….velar-sbtc-arb-receiver` | ✅ | whitelisted at review time; de-approved 2026-10 under F-10 (`docs/security/FINDINGS_REGISTER.md`) |
 | `SM3VDXK3…sbtc-token` (canonical sBTC) | ✅ | real mainnet token |
 
 Reference evidence tx: `0x67f0c77d…f9baa` → `success / (ok true)`, block 7875468.
@@ -144,7 +144,7 @@ Identical control flow to STX; the only substitutions are the **asset transfer m
 
 ## 8. Open questions for Phase C
 
-1. **Venue:** stick with Velar pool 70 (proven, whitelisted reference) or evaluate a Bitflow sBTC stableswap pair (lower slippage) if one exists? — to verify on-chain in Phase C.
+1. **Venue:** stick with Velar pool 70 (proven reference; its receiver was de-approved 2026-10 under F-10) or evaluate a Bitflow sBTC stableswap pair (lower slippage) if one exists? — to verify on-chain in Phase C.
 2. **Loan size & reserve:** confirm with Matt whether the sBTC reserve will be topped up, which sets the demo loan size.
 3. **Seed source:** bridge vs DEX-buy for the sBTC seed; who funds it.
 
