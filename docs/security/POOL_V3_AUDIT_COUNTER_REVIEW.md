@@ -146,6 +146,9 @@ proxy), existing LP shares would re-price. The asset allow-list already trusts t
 listing-policy note: don't list tokens with mutable decimals. Also consider `merge` so stats survive a
 relist.
 
+The listing policy is now written down in `POOL_V3_LISTING_POLICY.md`. It covers this, CR-1, CR-3, and
+fee-on-transfer tokens (threat model row 14), which `tests/pool-v3-fee-on-transfer.test.ts` pins.
+
 ### CR-6 — Informational — `total-fees` counts any repayment surplus
 
 `:392` adds `reserve-after − reserve-before`, which includes any over-repayment or donation landing during
