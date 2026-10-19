@@ -1,0 +1,304 @@
+# FlashStack — flashstack-stx-pool-v3 / flashstack-sbtc-pool-v3 testnet staging plan
+#
+# PLAN ONLY (Flashstack-ajv.6.9). Nothing in this file has been executed, and
+# nothing may be broadcast under it until Matt has reviewed and approved it.
+# The deploy script and the four receivers it names do not exist yet; they are
+# listed in docs/TESTNET_STAGING.md section 6e as next steps for approval.
+#
+# THIS IS NOT A CLARINET DEPLOYMENT PLAN. Do not run it with
+# `clarinet deployments apply` (same reason as testnet-pool-v3-plan.yaml:
+# Clarinet publishes source verbatim, with mainnet principals still in it).
+#
+# Fees and nonce rules are NOT estimated. They are read off the scripts that
+# have already run against testnet:
+#   deploy fee 500000          deploy-testnet-pool-v3.mjs deployContract (fee: 500_000)
+#   call fee 100000 (default)  deploy-testnet-pool-v3.mjs callContract (fee = 100_000)
+#   deposit 150000             deploy-testnet-pool-v3.mjs step 7 override
+#   flash-loan 200000          deploy-testnet-pool-v3.mjs step 9 override
+#   STX transfer 10000         deploy-testnet.mjs transferStx (fee = 10_000)
+#   sBTC transfer 100000       deploy-testnet-pool-v3.mjs step 8 override
+# Any call with no override in either script (withdraw, arm, set-mode,
+# seed-deposit, exit, rescue, set-paused, set-max-single-loan, the admin
+# calls) uses the 100000 default. No new fee level is introduced.
+#
+# Amounts (loan sizes, deposits, seeds) are reused from the two executed runs
+# where one exists (deploy-testnet.mjs for STX, deploy-testnet-pool-v3.mjs for
+# sBTC). The one deliberate change is the sBTC deposit: 5000 sats instead of
+# 10000, so the whole sBTC line fits the 9900 sats the deployer already holds
+# (read live 2026-10-15) and needs no new manual sBTC transfer.
+
+schema: flashstack-testnet-staging-plan/v1
+generated: 2026-10-15
+status: PLANNED — NOT EXECUTED, NOT APPROVED
+executed-by: node scripts/deploy-testnet-v3-pools.mjs   # does not exist yet; operator only
+network: testnet
+stacks-node: https://api.testnet.hiro.so
+explorer: https://explorer.hiro.so/txid
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Signers (state read live from the testnet API, 2026-10-15)
+# ─────────────────────────────────────────────────────────────────────────────
+signers:
+  K1:
+    address: ST3XQ5DMH4BRXVZWAHKJFBNND17CPCSAYMV4T0NFT
+    role: deployer and initial admin of both pools (same identity as §6a/§6b/§6d)
+    source: TESTNET_MNEMONIC
+    balance-microstx: 1442790000
+    balance-sbtc-sats: 9900       # SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1.sbtc-token
+    nonce-at-read: 23
+  K2:
+    address: ST2YZPFDGFZH37GTRG2RA7WME4QWTC3KNAP1SB96D
+    role: second, independent key for the two-step admin proof (same key as §6b)
+    source: the §6b second-wallet mnemonic (operator holds it; never committed)
+    balance-microstx: 499800000
+    nonce-at-read: 2
+  nonce-rule: >-
+    Fetched from /v2/accounts/<addr>?proof=0 at run start, then strictly +1 per
+    broadcast per signer, one tx confirmed before the next (waitForConfirm), as
+    in both executed scripts. A skipped publish (deployIfNeeded, contract
+    already exists) does not consume a nonce. A call that aborts on chain
+    (abort_by_response) DOES consume its nonce and its fee; every expected-
+    failure step below is one of these.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Localization (scripts/lib/testnet-localize.mjs, assertFullyLocalized)
+# ─────────────────────────────────────────────────────────────────────────────
+localization:
+  SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ: >-
+    OURS (gen-1 deployer). flashstack-stx-pool-v3.clar:40 use-trait
+    stx-flash-receiver-trait -> rewritten to K1.
+  SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5: >-
+    OURS (gen-2 deployer). flashstack-sbtc-pool-v3.clar:42 use-trait
+    sbtc-flash-receiver-trait -> rewritten to K1.
+  SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4: >-
+    TESTNET_EQUIVALENT -> SN3VMHXEN64ZZF71JQ5VESXDWTR301XTTXGF4J8F1 (corrected
+    2026-10-14, not ST1PQHQ...). Hardcoded 12 times in
+    flashstack-sbtc-pool-v3.clar (deposit, withdraw, flash-loan and every
+    read-only), and in the sBTC receivers' repay transfer.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Contracts — every clarity_version checked against source and Clarinet.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Lesson from §6d bug 2: pass the version explicitly per contract. Both v3
+# pools use `as-contract` and are registered at clarity_version 3
+# (Clarinet.toml [contracts.flashstack-stx-pool-v3] / [...sbtc-pool-v3]), so
+# Clarity 3 is correct here. Only flashstack-pool-v3 needed Clarity 6.
+contracts:
+  - name: stx-flash-receiver-trait
+    source: contracts/stx-flash-receiver-trait.clar
+    clarity-version: 3
+    state: ALREADY PUBLISHED at K1 (/v2/contracts/interface -> 200, 2026-10-15); deployIfNeeded skips it
+  - name: sbtc-flash-receiver-trait
+    source: contracts/sbtc-flash-receiver-trait.clar
+    clarity-version: 3
+    state: NOT published at K1 (404, 2026-10-15). Must be step P1 — §6d bug 1 was exactly this (a use-trait target nobody had published)
+  - name: flashstack-stx-pool-v3
+    source: contracts/flashstack-stx-pool-v3.clar
+    clarity-version: 3
+    state: not published (404)
+  - name: flashstack-sbtc-pool-v3
+    source: contracts/flashstack-sbtc-pool-v3.clar
+    clarity-version: 3
+    state: not published (404)
+  - name: stx-pool-v3-test-receiver
+    source: contracts/stx-pool-v3-test-receiver.clar     # TO BE WRITTEN, see §6e
+    clarity-version: 3
+  - name: stx-pool-v3-adversarial-receiver
+    source: contracts/stx-pool-v3-adversarial-receiver.clar     # TO BE WRITTEN
+    clarity-version: 3
+  - name: sbtc-pool-v3-test-receiver
+    source: contracts/sbtc-pool-v3-test-receiver.clar    # TO BE WRITTEN
+    clarity-version: 3
+  - name: sbtc-pool-v3-adversarial-receiver
+    source: contracts/sbtc-pool-v3-adversarial-receiver.clar    # TO BE WRITTEN
+    clarity-version: 3
+
+# Error codes the expected-failure steps assert, read from source:
+error-codes:
+  flashstack-stx-pool-v3:   # contracts/flashstack-stx-pool-v3.clar:48-66
+    ERR-NOT-ADMIN: 400
+    ERR-REPAY-FAILED: 402
+    ERR-EXCEEDS-LIMIT: 404
+    ERR-PAUSED: 405
+    ERR-NOT-APPROVED: 406
+    ERR-NOT-PENDING-ADMIN: 410
+    ERR-REENTRANT: 411
+  flashstack-sbtc-pool-v3:  # contracts/flashstack-sbtc-pool-v3.clar:48-67
+    ERR-NOT-ADMIN: 700
+    ERR-REPAY-FAILED: 702
+    ERR-EXCEEDS-LIMIT: 704
+    ERR-PAUSED: 705
+    ERR-NOT-APPROVED: 706
+    ERR-TRANSFER-FAILED: 710
+    ERR-NOT-PENDING-ADMIN: 711
+    ERR-REENTRANT: 712
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prerequisite
+# ─────────────────────────────────────────────────────────────────────────────
+prerequisite:
+  - id: P1
+    signer: K1
+    action: deployIfNeeded sbtc-flash-receiver-trait (Clarity 3)
+    fee: 500000
+    verify: /v2/contracts/interface/K1/sbtc-flash-receiver-trait -> 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Line A — flashstack-stx-pool-v3 (amounts in microSTX)
+# ─────────────────────────────────────────────────────────────────────────────
+# Line B (sBTC) is the same sequence with the u7xx codes, sats amounts and
+# sBTC transfers; it is listed in full below rather than implied.
+line-a-stx-pool-v3:
+  amounts:
+    deposit: 50000000            # deploy-testnet.mjs RESERVE_AMOUNT
+    honest-receiver-seed: 1000000 # deploy-testnet.mjs RECEIVER_SEED_AMOUNT
+    loan: 10000000               # deploy-testnet.mjs step 7 LOAN_AMOUNT; fee = 10000000*5/10000 = 5000
+    adversarial-fee-buffer: 1000000
+    adversarial-seed-deposit: 5000000
+    low-cap-for-limit-test: 5000000
+  steps:
+    # publish + initial state
+    - { id: A1,  signer: K1, deploy: flashstack-stx-pool-v3, fee: 500000,
+        verify: "get-admin = K1; get-pending-admin = (ok none); get-stats: paused false, fee 5 bp, max-single-loan u5000000000 (contract defaults :67-69), total-shares u0" }
+    - { id: A2,  signer: K1, deploy: stx-pool-v3-test-receiver, fee: 500000 }
+    - { id: A3,  signer: K1, deploy: stx-pool-v3-adversarial-receiver, fee: 500000 }
+    - { id: A4,  signer: K1, verify-only: "source byte-diff for A1-A3 (see source-verification below) BEFORE any approval" }
+    # unapproved receiver is rejected (closes a §6d "not proven" item for this line)
+    - { id: A5,  signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-test-receiver", fee: 200000,
+        expect: "abort_by_response (err u406) ERR-NOT-APPROVED" }
+    # receiver vetting record for the honest receiver is written BEFORE A6 (RECEIVER_VETTING.md §G)
+    - { id: A6,  signer: K1, call: "add-approved-receiver K1.stx-pool-v3-test-receiver", fee: 100000,
+        verify: "is-approved-receiver = true" }
+    - { id: A7,  signer: K1, call: "deposit u50000000", fee: 150000,
+        expect: "(ok u50000000000000)  ; 50000000 * (0 + 1e6) / (0 + 1), stx-pool-v3.clar:114" }
+    - { id: A8,  signer: K1, stx-transfer: "1000000 -> K1.stx-pool-v3-test-receiver", fee: 10000 }
+    - { id: A9,  signer: K1, call: "stx-pool-v3-test-receiver.arm u10000000", fee: 100000 }
+    - { id: A10, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-test-receiver", fee: 200000,
+        expect: "(ok true); get-pool-balance grows by exactly 5000; receiver balance 1000000 - 5000; get-stats total-loans u1 / total-volume u10000000 / total-fees u5000" }
+    # max-single-loan is enforced, then restored
+    - { id: A11, signer: K1, call: "set-max-single-loan u5000000", fee: 100000 }
+    - { id: A12, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-test-receiver", fee: 200000,
+        expect: "abort_by_response (err u404) ERR-EXCEEDS-LIMIT; rejected before the callback, so no arm needed" }
+    - { id: A13, signer: K1, call: "set-max-single-loan u5000000000", fee: 100000, verify: "get-stats max-single-loan back to default" }
+    # adversarial receiver: the F-9 lock, proven on chain (see §6e for why this is safe to publish)
+    - { id: A14, signer: K1, call: "add-approved-receiver K1.stx-pool-v3-adversarial-receiver", fee: 100000,
+        note: "deliberate, documented exception to RECEIVER_VETTING item 13; removed again at A26" }
+    - { id: A15, signer: K1, stx-transfer: "6000000 -> K1.stx-pool-v3-adversarial-receiver", fee: 10000,
+        note: "1 STX fee buffer + 5 STX for seed-deposit" }
+    - { id: A16, signer: K1, call: "adversarial.seed-deposit u5000000", fee: 100000,
+        expect: "(ok <shares>) credited to the receiver contract; record the share count" }
+    - { id: A17, signer: K1, call: "adversarial.arm u1 u10000000", fee: 100000 }
+    - { id: A18, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-adversarial-receiver", fee: 200000,
+        expect: "abort_by_response (err u411) ERR-REENTRANT — deposit-as-repayment (F-9) blocked; total-shares, receiver shares, pool balance and stats all unchanged vs before A18" }
+    - { id: A19, signer: K1, call: "adversarial.arm u2 u10000000", fee: 100000 }
+    - { id: A20, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-adversarial-receiver", fee: 200000,
+        expect: "abort_by_response (err u411) — withdraw reentry blocked; receiver's seeded shares untouched" }
+    - { id: A21, signer: K1, call: "adversarial.arm u3 u10000000", fee: 100000 }
+    - { id: A22, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-adversarial-receiver", fee: 200000,
+        expect: "abort_by_response (err u402) ERR-REPAY-FAILED — under-repay rejected (closes the §6d under-paying item for this line)" }
+    - { id: A23, signer: K1, call: "adversarial.arm u0 u10000000", fee: 100000 }
+    - { id: A24, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-adversarial-receiver", fee: 200000,
+        expect: "(ok true) — the lock was released after three blocked/reverted loans" }
+    - { id: A25, signer: K1, call: "adversarial.exit", fee: 100000,
+        expect: "withdraw of the receiver's seeded shares OUTSIDE a loan succeeds (lock is not stuck)" }
+    - { id: A26, signer: K1, call: "remove-approved-receiver K1.stx-pool-v3-adversarial-receiver", fee: 100000,
+        verify: "is-approved-receiver = false" }
+    - { id: A27, signer: K1, call: "adversarial.rescue-stx <full balance>", fee: 100000, verify: "receiver STX balance = 0" }
+    # pause: blocks deposit and flash-loan, never withdraw (F-8)
+    - { id: A28, signer: K1, call: "set-paused true", fee: 100000 }
+    - { id: A29, signer: K1, call: "deposit u1000000", fee: 150000, expect: "abort_by_response (err u405) ERR-PAUSED" }
+    - { id: A30, signer: K1, call: "flash-loan u10000000 K1.stx-pool-v3-test-receiver", fee: 200000, expect: "abort_by_response (err u405)" }
+    - { id: A31, signer: K1, call: "withdraw <10% of K1's shares>", fee: 100000, expect: "(ok <stx>) — LPs can exit while paused" }
+    - { id: A32, signer: K1, call: "set-paused false", fee: 100000 }
+    # two-step admin (BC1), same shape as §6b
+    - { id: A33, signer: K1, call: "transfer-admin K2", fee: 100000, verify: "get-admin still K1; get-pending-admin = (ok (some K2))" }
+    - { id: A34, signer: K1, call: "accept-admin", fee: 100000, expect: "abort_by_response (err u410) ERR-NOT-PENDING-ADMIN; get-admin still K1" }
+    - { id: A35, signer: K2, call: "accept-admin", fee: 100000, verify: "get-admin = K2; get-pending-admin = none" }
+    - { id: A36, signer: K2, call: "transfer-admin K1", fee: 100000 }
+    - { id: A37, signer: K1, call: "accept-admin", fee: 100000, verify: "get-admin = K1; get-pending-admin = none (restored)" }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Line B — flashstack-sbtc-pool-v3 (amounts in sats of SN3VMH...sbtc-token)
+# ─────────────────────────────────────────────────────────────────────────────
+line-b-sbtc-pool-v3:
+  amounts:
+    deposit: 5000                # reduced from §6d's 10000 so the line fits K1's 9900 sats
+    honest-receiver-seed: 100    # deploy-testnet-pool-v3.mjs RECEIVER_SEED_AMOUNT
+    loan: 2000                   # deploy-testnet-pool-v3.mjs LOAN_AMOUNT; fee = 2000*5/10000 = 1
+    adversarial-fee-buffer: 100
+    adversarial-seed-deposit: 1000
+    low-cap-for-limit-test: 1000
+    total-sbtc-needed: 6200      # 5000 + 100 + 100 + 1000; K1 holds 9900
+  steps:
+    - { id: B1,  signer: K1, deploy: flashstack-sbtc-pool-v3, fee: 500000,
+        verify: "get-admin = K1; get-pending-admin = (ok none); get-stats: paused false, fee 5 bp, max-single-loan u10000000 (defaults :68-70)" }
+    - { id: B2,  signer: K1, deploy: sbtc-pool-v3-test-receiver, fee: 500000 }
+    - { id: B3,  signer: K1, deploy: sbtc-pool-v3-adversarial-receiver, fee: 500000 }
+    - { id: B4,  signer: K1, verify-only: "source byte-diff for B1-B3 before any approval" }
+    - { id: B5,  signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-test-receiver", fee: 200000, expect: "(err u706) ERR-NOT-APPROVED" }
+    - { id: B6,  signer: K1, call: "add-approved-receiver K1.sbtc-pool-v3-test-receiver", fee: 100000 }
+    - { id: B7,  signer: K1, call: "deposit u5000", fee: 150000, expect: "(ok u500000000000)  ; 5000 * (0 + 1e8) / (0 + 1), sbtc-pool-v3.clar:106" }
+    - { id: B8,  signer: K1, sbtc-transfer: "100 -> K1.sbtc-pool-v3-test-receiver", fee: 100000 }
+    - { id: B9,  signer: K1, call: "sbtc-pool-v3-test-receiver.arm u2000", fee: 100000 }
+    - { id: B10, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-test-receiver", fee: 200000,
+        expect: "(ok true); get-pool-balance u5000 -> u5001; receiver 99 sats; total-fees u1" }
+    - { id: B11, signer: K1, call: "set-max-single-loan u1000", fee: 100000 }
+    - { id: B12, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-test-receiver", fee: 200000, expect: "(err u704) ERR-EXCEEDS-LIMIT" }
+    - { id: B13, signer: K1, call: "set-max-single-loan u10000000", fee: 100000 }
+    - { id: B14, signer: K1, call: "add-approved-receiver K1.sbtc-pool-v3-adversarial-receiver", fee: 100000, note: "documented exception, removed at B26" }
+    - { id: B15, signer: K1, sbtc-transfer: "1100 -> K1.sbtc-pool-v3-adversarial-receiver", fee: 100000 }
+    - { id: B16, signer: K1, call: "adversarial.seed-deposit u1000", fee: 100000 }
+    - { id: B17, signer: K1, call: "adversarial.arm u1 u2000", fee: 100000 }
+    - { id: B18, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-adversarial-receiver", fee: 200000, expect: "(err u712) ERR-REENTRANT; nothing changed" }
+    - { id: B19, signer: K1, call: "adversarial.arm u2 u2000", fee: 100000 }
+    - { id: B20, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-adversarial-receiver", fee: 200000, expect: "(err u712)" }
+    - { id: B21, signer: K1, call: "adversarial.arm u3 u2000", fee: 100000 }
+    - { id: B22, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-adversarial-receiver", fee: 200000, expect: "(err u702) ERR-REPAY-FAILED" }
+    - { id: B23, signer: K1, call: "adversarial.arm u0 u2000", fee: 100000 }
+    - { id: B24, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-adversarial-receiver", fee: 200000, expect: "(ok true) — lock released" }
+    - { id: B25, signer: K1, call: "adversarial.exit", fee: 100000 }
+    - { id: B26, signer: K1, call: "remove-approved-receiver K1.sbtc-pool-v3-adversarial-receiver", fee: 100000 }
+    - { id: B27, signer: K1, call: "adversarial.rescue-sbtc <full balance>", fee: 100000 }
+    - { id: B28, signer: K1, call: "set-paused true", fee: 100000 }
+    - { id: B29, signer: K1, call: "deposit u100", fee: 150000, expect: "(err u705) ERR-PAUSED" }
+    - { id: B30, signer: K1, call: "flash-loan u2000 K1.sbtc-pool-v3-test-receiver", fee: 200000, expect: "(err u705)" }
+    - { id: B31, signer: K1, call: "withdraw <10% of K1's shares>", fee: 100000, expect: "(ok <sats>)" }
+    - { id: B32, signer: K1, call: "set-paused false", fee: 100000 }
+    - { id: B33, signer: K1, call: "transfer-admin K2", fee: 100000 }
+    - { id: B34, signer: K1, call: "accept-admin", fee: 100000, expect: "(err u711) ERR-NOT-PENDING-ADMIN" }
+    - { id: B35, signer: K2, call: "accept-admin", fee: 100000 }
+    - { id: B36, signer: K2, call: "transfer-admin K1", fee: 100000 }
+    - { id: B37, signer: K1, call: "accept-admin", fee: 100000, verify: "admin restored to K1" }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Source verification (bead item 8)
+# ─────────────────────────────────────────────────────────────────────────────
+source-verification: >-
+  For every contract published by this plan: fetch /v2/contracts/source/K1/<name>,
+  compute sha256, and compare it with sha256(localize(<repo file at the reviewed
+  commit>, K1)). Equal hashes, or a diff that is ONLY the localized principals,
+  are required before that contract is approved (steps A4/B4). Record the
+  commit SHA and both hashes in §6e's evidence.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Totals — fees only (principal STX/sBTC moved is listed per line above)
+# ─────────────────────────────────────────────────────────────────────────────
+totals:
+  prerequisite-microstx: 500000
+  line-a-microstx: 5520000   # 3 deploys 1500000 + 21 calls x 100000 + 2 deposits x 150000 + 8 flash-loans x 200000 + 2 STX transfers x 10000
+  line-b-microstx: 5700000   # same, with 2 sBTC transfers x 100000 instead of 2 STX transfers x 10000
+  all-microstx: 11720000     # 11.72 STX
+  of-which-K2-microstx: 400000   # A35, A36, B35, B36
+  principal-moved-stx-microstx: 57000000   # A7 + A8 + A15; most returns via A25/A27/A31
+  principal-moved-sbtc-sats: 6200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stop / rollback (bead item 10)
+# ─────────────────────────────────────────────────────────────────────────────
+stop-rules:
+  - Any step whose on-chain result differs from `expect` -> stop the run. If the pool is published, K1 calls set-paused true, then records the txid and the read-backs. Do not retry blind.
+  - A publish that aborts consumes the contract NAME permanently at K1 (deployment scars, CONTRACT_INVENTORY.md §3). The fix ships under a new name (for example -v3b), and this plan is amended first.
+  - An expected-failure step that SUCCEEDS (A18/A20/B18/B20 in particular) is a security finding, not a test glitch: pause, stop, report to the Security & Contract Lead before anything else.
+  - If K1's sBTC balance reads below 6200 at preflight, stop before B1 (do not run line B partially).
+
+evidence: {}   # filled from a run, every txid re-verified against /extended/v1/tx/0x<txid>
