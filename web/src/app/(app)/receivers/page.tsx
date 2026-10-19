@@ -96,32 +96,32 @@ export default function ReceiversPage() {
       <div className="bg-surface-card border border-surface-border rounded-xl p-6">
         <h2 className="text-white font-semibold mb-1">Build Your Own Receiver</h2>
         <p className="text-slate-400 text-sm mb-5 leading-relaxed">
-          Implement <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">stx-flash-receiver-trait</code> — one function,
-          deploy to mainnet, DM us to get whitelisted. Zero collateral. Only pay Stacks gas (~$0.002).
-          If your strategy can&apos;t repay, the entire tx reverts automatically.
+          Implement <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">stx-flash-receiver-trait</code>: one function.
+          Lock it to the core with a <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">contract-caller</code> check and repay a hardcoded core,
+          never the <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">core</code> argument. Receivers without this could be drained and were
+          de-approved (finding F-10). Then deploy and DM us to get whitelisted. If your strategy can&apos;t repay, the entire tx reverts.
         </p>
         <pre className="bg-surface rounded-lg border border-surface-border p-4 text-xs text-slate-300 overflow-x-auto leading-relaxed">
-{`;; 1. Implement the trait
-(impl-trait 'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
+{`;; Hardened receiver: only the core may call it, and it
+;; repays a hardcoded core, never the core argument (F-10)
+(impl-trait
+  'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 
-;; 2. This is the only function you need
+(define-constant FLASH-CORE
+  'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
+
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let (
-    (fee       (/ (* amount u5) u10000))  ;; 0.05%
-    (total-owed (+ amount fee))
-  )
-    ;; ── YOUR STRATEGY HERE ──────────────────────────
-    ;; You have (amount) STX in this contract right now.
-    ;; Arbitrage, liquidate, swap — anything on-chain.
-    ;; ────────────────────────────────────────────────
+  (let ((raw-fee (/ (* amount u5) u10000))            ;; 0.05%
+        (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
+    (asserts! (is-eq contract-caller FLASH-CORE) (err u401))
+    (asserts! (is-eq core FLASH-CORE) (err u401))
 
-    ;; Repay principal + fee before returning
-    (unwrap! (as-contract (stx-transfer? total-owed tx-sender core)) (err u500))
-    (ok true)
-  )
-)
+    ;; --- YOUR STRATEGY HERE ---
+    ;; arbitrage, liquidate, swap...
 
-;; 3. Deploy + request whitelist at flashstack.vercel.app`}
+    (as-contract (stx-transfer? owed tx-sender FLASH-CORE))))
+
+;; Deploy, then ask to be approved on the core`}
         </pre>
 
         <div className="mt-4 pt-4 border-t border-surface-border flex flex-col sm:flex-row gap-3">

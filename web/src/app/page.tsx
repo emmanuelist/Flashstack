@@ -248,26 +248,26 @@ export default function LandingPage() {
               <div className="w-3 h-3 rounded-full bg-red-500/50" />
               <div className="w-3 h-3 rounded-full bg-yellow-500/50" />
               <div className="w-3 h-3 rounded-full bg-green-500/50" />
-              <span className="ml-2 text-xs text-slate-500">my-strategy.clar</span>
+              <span className="ml-2 text-xs text-slate-500">my-receiver.clar</span>
             </div>
-            <pre className="p-5 text-xs leading-relaxed overflow-x-auto text-slate-300"><code>{`;; Implement this one function
-(define-public (execute-stx-flash
-    (amount uint)
-    (core principal))
-  (let (
-    ;; fee = 0.05% of amount
-    (fee (/ (* amount u5) u10000))
-  )
+            <pre className="p-5 text-xs leading-relaxed overflow-x-auto text-slate-300"><code>{`;; Hardened receiver: only the core may call it, and it
+;; repays a hardcoded core, never the core argument (F-10)
+(impl-trait
+  'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
+
+(define-constant FLASH-CORE
+  'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
+
+(define-public (execute-stx-flash (amount uint) (core principal))
+  (let ((raw-fee (/ (* amount u5) u10000))            ;; 0.05%
+        (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
+    (asserts! (is-eq contract-caller FLASH-CORE) (err u401))
+    (asserts! (is-eq core FLASH-CORE) (err u401))
+
     ;; --- YOUR STRATEGY HERE ---
     ;; arbitrage, liquidate, swap...
-    ;; --------------------------
 
-    ;; Repay principal + fee
-    (stx-transfer?
-      (+ amount fee)
-      tx-sender core)
-  )
-)`}</code></pre>
+    (as-contract (stx-transfer? owed tx-sender FLASH-CORE))))`}</code></pre>
           </div>
         </div>
       </section>
