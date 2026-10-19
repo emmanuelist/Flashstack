@@ -102,7 +102,7 @@ Go to the [flashstack-sbtc-core explorer page](https://explorer.hiro.so/address/
 | `get-reserve-balance` | > 0 sats (current reserve) |
 | `get-fee-basis-points` | `(ok u5)` — 0.05% fee |
 | `get-max-single-loan` | `(ok u10000000)` — 0.1 BTC |
-| `get-admin` | `(ok SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5)` |
+| `get-admin` | `(ok SPR9PQANV6XHSDNRAX2GNKCA5Z1KH61961KE0BYG)`. Admin was rotated off the deployer wallet. |
 | `is-approved-receiver` → `SP20XD46...sbtc-test-receiver` | `(ok false)` — de-approved under F-10 |
 | `calculate-fee u10000` | `(ok u1)` — minimum 1 sat fee |
 | `calculate-fee u1000000` | `(ok u50)` — 0.05% of 1M sats |
@@ -206,4 +206,4 @@ Any Clarity contract that implements the `sbtc-flash-receiver-trait` can borrow 
 - Message Matt directly on X [@flashstackbtc](https://x.com/flashstackbtc) or via GitHub
 - For failed txs: share the txid from [Hiro Explorer](https://explorer.hiro.so)
 - To request whitelist for your receiver contract: open an issue on [GitHub](https://github.com/mattglory/Flashstack)
-- Do not call admin functions (`deposit-reserve`, `add-approved-receiver`, `set-paused`) — deployer wallet only
+- Do not call admin functions (`deposit-reserve`, `add-approved-receiver`, `set-paused`) — admin wallet (`SPR9PQAN...`) only

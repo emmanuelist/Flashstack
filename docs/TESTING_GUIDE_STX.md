@@ -15,7 +15,7 @@ FlashStack has two generations of implementation in this repo:
 | sBTC flash loans (`flashstack-core`, `sbtc-token`) | Legacy — SP3TGRVG7... wallet | No — reference only |
 | STX flash loans (`flashstack-stx-core`, `flashstack-stx-pool`) | Active — SP20XD46... wallet | Yes — this is the focus |
 
-The Clarinet local tests and `docs/archive/` cover the **legacy** sBTC path (`flashstack-core`, SP3TGRVG7...) — kept for historical reference only. Note: the canonical sBTC engine `flashstack-sbtc-core` (SP20XD46...) is **live and active** (reserve ~15,010 sats, fee 5 bps; see `docs/TESTING_GUIDE_SBTC.md`). Only the old `flashstack-core` path is legacy.
+The Clarinet local tests and `docs/archive/` cover the **legacy** sBTC path (`flashstack-core`, SP3TGRVG7...) — kept for historical reference only. Note: the canonical sBTC engine `flashstack-sbtc-core` (SP20XD46...) is **live and active** (fee 5 bps; read `get-reserve-balance` for the current reserve; see `docs/TESTING_GUIDE_SBTC.md`). Only the old `flashstack-core` path is legacy.
 
 ---
 
@@ -99,10 +99,10 @@ Call `get-reserve-balance` on `flashstack-stx-core`. The result must be ≥ your
 
 | Function | Expected result |
 |----------|----------------|
-| `get-reserve-balance` | > 0 (currently ~80 STX) |
+| `get-reserve-balance` | > 0 (read it live; the admin can deposit or withdraw at any time) |
 | `get-fee-basis-points` | `(ok u5)` — 0.05% fee |
 | `get-max-single-loan` | `(ok u500000000000)` — 500,000 STX limit |
-| `get-admin` | `(ok SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5)` |
+| `get-admin` | `(ok SPR9PQANV6XHSDNRAX2GNKCA5Z1KH61961KE0BYG)`. Admin was rotated off the deployer wallet. |
 | `is-approved-receiver` with `SP20XD46...stx-test-receiver` | `false` — de-approved under F-10 (STX core returns a bare bool, not `(ok ...)`) |
 | `is-approved-receiver` with `SP20XD46...bitflow-arb-receiver-v4` | `false` — de-approved under F-10 |
 | `calculate-fee u10000000` | `(ok u5000)` — fee on 10 STX |
@@ -201,4 +201,4 @@ There is no Clarinet setup for the STX contracts because the core dependency (`S
 
 - Slack or email Matt directly
 - For on-chain tx issues, link the failed txid from [Hiro Explorer](https://explorer.hiro.so)
-- Do not attempt to call admin functions (`deposit-reserve`, `add-approved-receiver`, `set-paused`) — these require the deployer wallet
+- Do not attempt to call admin functions (`deposit-reserve`, `add-approved-receiver`, `set-paused`) — these require the admin wallet (`SPR9PQAN...`)

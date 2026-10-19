@@ -4,6 +4,7 @@
 **Date:** 2026-06-06
 **Milestone:** 2 (external sBTC receiver on mainnet)
 **Status:** Built & validated off-chain. **Mainnet deploy/execute is GATED on:** (1) acquiring the sBTC seed, (2) Matt whitelisting the receiver. No mainnet transactions broadcast yet.
+**Update 2026-10-15:** v1 is now deployed and approved on `flashstack-sbtc-core`. It is being replaced by `hk-sbtc-real-receiver-v2` (Bitflow pool 21, #115), and v1's approval is to be removed once v2's smoke loan passes.
 **Companion docs:** `minimum_seed_analysis.md` · `sbtc-architecture-review.md`
 
 ---
@@ -22,7 +23,7 @@ Architecture = **M1 skeleton** (caller gate, dynamic fee, fail-closed repay, own
 |---|---|---|
 | **ADR-S1** | Reuse the M1 receiver skeleton; swap STX primitives → sBTC SIP-010 calls | M1 is proven on mainnet; minimizes new surface |
 | **ADR-S2** | Add a **caller gate** (`contract-caller == flashstack-sbtc-core` → `ERR-WRONG-CALLER u403`) | `velar-sbtc-arb-receiver` exposes a **public** `execute-sbtc-flash` with no gate — a direct-drain vector. Non-negotiable. **Runtime-tested: a non-core caller returns `(err u403)`** (simnet). |
-| **ADR-S3** | Venue = **Velar univ2 pool 70** (wSTX/sBTC) | Only proven, whitelisted on-chain sBTC round-trip in-repo. Live reserves: 223,275 wSTX / 65,845,796 sats. Accept ~0.6% round-trip cost; objective is execution, not profit. |
+| **ADR-S3** | Venue = **Velar univ2 pool 70** (wSTX/sBTC) | Only proven on-chain sBTC round-trip in-repo (its receiver, `velar-sbtc-arb-receiver`, was whitelisted then; de-approved 2026-10 under F-10). Live reserves: 223,275 wSTX / 65,845,796 sats. Accept ~0.6% round-trip cost; objective is execution, not profit. |
 | **ADR-S4** | `min-out = u1` on both legs; repay-assert + core reserve check are the gates | Same as M1; avoids percentage-floor reverts. No funds at risk — under-repay reverts the whole tx. |
 | **ADR-S5** | **Absolute** mainnet principals everywhere | External deploy; `.sugar` would resolve to our wallet (M1 ADR-001) |
 | **ADR-S6** | Seed the receiver with real canonical sBTC, sized to round-trip loss + fee + margin; recover via `rescue-sbtc` | Receiver pays fee + slippage from its own balance. See `minimum_seed_analysis.md`: 1,000-sat loan → ~7-sat min seed, **seed 500 sats (safe)**. |
