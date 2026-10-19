@@ -94,9 +94,12 @@
 ;; Hard cap on per-asset fee: admin cannot set a predatory fee (decision #4).
 (define-constant MAX-FEE-BP u100) ;; 100 bp = 1%
 
-;; Sanity cap on a listed token's own get-decimals() (F2 fix). No real SIP-010
-;; exceeds this; guards the share-scale computation against a pathological value.
-(define-constant MAX-DECIMALS u24)
+;; Cap on a listed token's own get-decimals() (F2 fix, lowered by CR-1).
+;; share-scale is 10^decimals, so withdraw/deposit/get-lp-value form products
+;; of roughly amount^2 * 10^decimals. Above 8 decimals that overflows uint128
+;; at realistic balances and locks LPs in (docs/security/
+;; POOL_V3_AUDIT_COUNTER_REVIEW.md, CR-1). sBTC (8) and USDCx (6) fit.
+(define-constant MAX-DECIMALS u8)
 
 ;; F-1 fix: virtual shares + virtual assets (OpenZeppelin ERC-4626 inflation-
 ;; attack mitigation). VIRTUAL-ASSETS is asset-agnostic (always "1 phantom
