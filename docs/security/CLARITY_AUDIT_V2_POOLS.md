@@ -121,8 +121,9 @@ on-chain caller would have to be a published contract that names it. No integrat
 | OV2-A | Informational | The header comment is stale. It says "Not yet deployed", calls itself "a read-only oracle wrapper around flashstack-stx-pool" (v1), and says "Pool balance only increases" (false: `withdraw` decreases it; only the per-share value is non-decreasing). It also says "At launch: 1 share = 1 microSTX" when one share is about `1e-6` uSTX. Same class as V2-A. | Immutable. Correct the description in INTEGRATION_GUIDE and the README instead. |
 
 The same F-11 structure (`VIRTUAL-SHARES` equal to `SHARE-PRECISION`) appears in
-`flashstack-sbtc-pool-v2`'s built-in `get-share-price` (1e8/1e8). That one is out of
-scope for this pass and should be checked under its own item.
+`flashstack-sbtc-pool-v2`'s built-in `get-share-price` (1e8/1e8). Checked 2026-10-15
+(`Flashstack-ajv.4.12`): it is affected the same way. It reads `1` live, and the detail is in
+the FINDINGS_REGISTER F-11 row.
 
 ## Notes
 
