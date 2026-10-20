@@ -96,30 +96,62 @@ export default function ReceiversPage() {
       <div className="bg-surface-card border border-surface-border rounded-xl p-6">
         <h2 className="text-white font-semibold mb-1">Build Your Own Receiver</h2>
         <p className="text-slate-400 text-sm mb-5 leading-relaxed">
-          Implement <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">stx-flash-receiver-trait</code>: one function.
+          Implement <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">stx-flash-receiver-trait</code>.
           Lock it to the core with a <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">contract-caller</code> check and repay a hardcoded core,
-          never the <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">core</code> argument. Receivers without this could be drained and were
-          de-approved (finding F-10). Then deploy and DM us to get whitelisted. If your strategy can&apos;t repay, the entire tx reverts.
+          never the <code className="text-slate-300 bg-surface-hover px-1.5 py-0.5 rounded text-xs">core</code> argument (finding F-10). Anyone can call
+          flash-loan naming your receiver, so only run a loan you armed from the owner wallet first. The full list is in the{" "}
+          <a href="https://github.com/mattglory/Flashstack/blob/main/docs/security/RECEIVER_VETTING.md" target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline">receiver vetting checklist</a>.
+          Then deploy and DM us to get whitelisted. If your strategy can&apos;t repay, the entire tx reverts.
         </p>
         <pre className="bg-surface rounded-lg border border-surface-border p-4 text-xs text-slate-300 overflow-x-auto leading-relaxed">
-{`;; Hardened receiver: only the core may call it, and it
-;; repays a hardcoded core, never the core argument (F-10)
+{`;; Hardened receiver, per docs/security/RECEIVER_VETTING.md:
+;; only the core may call it and it repays a hardcoded core (F-10),
+;; and only a loan the owner armed can run (C7). Anyone can call
+;; flash-loan naming this receiver; without the arm, they could make
+;; it run your strategy and spend its fee buffer.
+;; Clarity 3: Clarity 4 replaces as-contract with as-contract?.
 (impl-trait
   'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 
 (define-constant FLASH-CORE
   'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 
+(define-data-var owner principal tx-sender)
+(define-data-var armed (optional uint) none)
+
+;; Owner arms exactly one loan amount, then calls flash-loan
+(define-public (arm-loan (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) (err u403))
+    (asserts! (> amount u0) (err u400))
+    (ok (var-set armed (some amount)))))
+
+(define-public (disarm)
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) (err u403))
+    (ok (var-set armed none))))
+
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let ((raw-fee (/ (* amount u5) u10000))            ;; 0.05%
-        (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
+  (begin
     (asserts! (is-eq contract-caller FLASH-CORE) (err u401))
     (asserts! (is-eq core FLASH-CORE) (err u401))
+    ;; a loan the owner didn't arm stops here; the arm is single-use
+    (asserts! (is-eq (var-get armed) (some amount)) (err u402))
+    (var-set armed none)
+    (let ((fee-bp (unwrap! (contract-call?
+                    'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core
+                    get-fee-basis-points) (err u404)))
+          (raw-fee (/ (* amount fee-bp) u10000))
+          (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
 
-    ;; --- YOUR STRATEGY HERE ---
-    ;; arbitrage, liquidate, swap...
+      ;; --- YOUR STRATEGY HERE ---
+      ;; arbitrage, liquidate, swap...
+      ;; check profit against the balance read at the start (C9)
 
-    (as-contract (stx-transfer? owed tx-sender FLASH-CORE))))
+      (as-contract (stx-transfer? owed tx-sender FLASH-CORE)))))
+
+;; Before mainnet, also add owner-only rescue (E17) and a
+;; two-step ownership transfer (E18).
 
 ;; Deploy, then ask to be approved on the core`}
         </pre>

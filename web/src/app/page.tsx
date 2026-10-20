@@ -228,7 +228,7 @@ export default function LandingPage() {
           <div>
             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Build your strategy</h2>
             <p className="text-slate-400 leading-relaxed mb-6">
-              Any Clarity contract can be a FlashStack receiver. Implement one function, deploy, get whitelisted, and access the full STX reserve or up to 0.1 BTC per transaction.
+              Any Clarity contract can be a FlashStack receiver. Implement the callback, lock it to the core, arm each loan from your owner wallet, deploy, get whitelisted, and access the full STX reserve or up to 0.1 BTC per transaction.
             </p>
             <div className="space-y-3 mb-8">
               <Feature text="STX or sBTC arbitrage between DEXes" />
@@ -250,24 +250,54 @@ export default function LandingPage() {
               <div className="w-3 h-3 rounded-full bg-green-500/50" />
               <span className="ml-2 text-xs text-slate-500">my-receiver.clar</span>
             </div>
-            <pre className="p-5 text-xs leading-relaxed overflow-x-auto text-slate-300"><code>{`;; Hardened receiver: only the core may call it, and it
-;; repays a hardcoded core, never the core argument (F-10)
+            <pre className="p-5 text-xs leading-relaxed overflow-x-auto text-slate-300"><code>{`;; Hardened receiver, per docs/security/RECEIVER_VETTING.md:
+;; only the core may call it and it repays a hardcoded core (F-10),
+;; and only a loan the owner armed can run (C7). Anyone can call
+;; flash-loan naming this receiver; without the arm, they could make
+;; it run your strategy and spend its fee buffer.
+;; Clarity 3: Clarity 4 replaces as-contract with as-contract?.
 (impl-trait
   'SP3TGRVG7DKGFVRTTVGGS60S59R916FWB4DAB9STZ.stx-flash-receiver-trait.stx-flash-receiver-trait)
 
 (define-constant FLASH-CORE
   'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core)
 
+(define-data-var owner principal tx-sender)
+(define-data-var armed (optional uint) none)
+
+;; Owner arms exactly one loan amount, then calls flash-loan
+(define-public (arm-loan (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) (err u403))
+    (asserts! (> amount u0) (err u400))
+    (ok (var-set armed (some amount)))))
+
+(define-public (disarm)
+  (begin
+    (asserts! (is-eq tx-sender (var-get owner)) (err u403))
+    (ok (var-set armed none))))
+
 (define-public (execute-stx-flash (amount uint) (core principal))
-  (let ((raw-fee (/ (* amount u5) u10000))            ;; 0.05%
-        (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
+  (begin
     (asserts! (is-eq contract-caller FLASH-CORE) (err u401))
     (asserts! (is-eq core FLASH-CORE) (err u401))
+    ;; a loan the owner didn't arm stops here; the arm is single-use
+    (asserts! (is-eq (var-get armed) (some amount)) (err u402))
+    (var-set armed none)
+    (let ((fee-bp (unwrap! (contract-call?
+                    'SP20XD46NGAX05ZQZDKFYCCX49A3852BQABNP0VG5.flashstack-stx-core
+                    get-fee-basis-points) (err u404)))
+          (raw-fee (/ (* amount fee-bp) u10000))
+          (owed (+ amount (if (> raw-fee u0) raw-fee u1))))
 
-    ;; --- YOUR STRATEGY HERE ---
-    ;; arbitrage, liquidate, swap...
+      ;; --- YOUR STRATEGY HERE ---
+      ;; arbitrage, liquidate, swap...
+      ;; check profit against the balance read at the start (C9)
 
-    (as-contract (stx-transfer? owed tx-sender FLASH-CORE))))`}</code></pre>
+      (as-contract (stx-transfer? owed tx-sender FLASH-CORE)))))
+
+;; Before mainnet, also add owner-only rescue (E17) and a
+;; two-step ownership transfer (E18).`}</code></pre>
           </div>
         </div>
       </section>
